@@ -40,11 +40,19 @@ int main(int argc, char **argv) {
 	// ==========================================================================
 
 	// TODO: some magical lines of code here that call other functions and do various stuff.
-	struct torrent_t* torrent;
-	char downloaded_name[1024];
-	strncpy(downloaded_name, (const char *) argv[1], strlen((const char *) argv[1]) - 9);
-	//printf("Donwloaded file name: %s", downloaded_name);
-	int n = create_torrent_from_metainfo_file((const char *) argv[1], (struct torrent_t *)torrent, (const char *) downloaded_name);
+	// Check if client or server using argc and argv.
+	struct torrent_t torrent;
+	char downloaded_name[2048];
+	for (int i = 0; i < (int) strlen((const char *) argv[1]); i++) {
+		if (argv[1][i] != '.')
+			downloaded_name[i] = argv[1][i];
+		else{
+			downloaded_name[i] = '\0';
+			break;
+		}
+	}
+	// printf("Donwloaded file name: %s", downloaded_name);
+	int n = create_torrent_from_metainfo_file((const char *) argv[1], (struct torrent_t *) &torrent, (const char *) downloaded_name);
 	if(n == -1){
 		perror("error");
 		return 1;
