@@ -9,6 +9,7 @@
 #include <netdb.h>
 #include <stdio.h>
 #include <sys/socket.h>
+#include <string.h>
 
 // TODO: hey!? what is this?
 
@@ -31,18 +32,19 @@ enum { RAW_MESSAGE_SIZE = 13 };
 int main(int argc, char **argv) {
 
 	set_log_level(LOG_DEBUG);
-
 	log_printf(LOG_INFO, "Trivial Torrent (build %s %s) by %s", __DATE__, __TIME__, "Y. CORDERO and A. VARGAS");
-	// printf("File name: %s", argv[1]);
-
+	//printf("File name: %s", argv[1]);
+	
 	// ==========================================================================
 	// Parse command line
 	// ==========================================================================
 
 	// TODO: some magical lines of code here that call other functions and do various stuff.
-
 	struct torrent_t* torrent;
-	int n = create_torrent_from_metainfo_file("test_file.ttorrent", torrent, argv[1]);
+	char downloaded_name[1024];
+	strncpy(downloaded_name, (const char *) argv[1], strlen((const char *) argv[1]) - 9);
+	//printf("Donwloaded file name: %s", downloaded_name);
+	int n = create_torrent_from_metainfo_file((const char *) argv[1], (struct torrent_t *)torrent, (const char *) downloaded_name);
 	if(n == -1){
 		perror("error");
 		return 1;
