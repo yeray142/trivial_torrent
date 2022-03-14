@@ -6,6 +6,10 @@
 #include "file_io.h"
 #include "logger.h"
 
+#include <netdb.h>
+#include <stdio.h>
+#include <sys/socket.h>
+
 // TODO: hey!? what is this?
 
 /**
@@ -28,13 +32,22 @@ int main(int argc, char **argv) {
 
 	set_log_level(LOG_DEBUG);
 
-	log_printf(LOG_INFO, "Trivial Torrent (build %s %s) by %s", __DATE__, __TIME__, "J. DOE and J. DOE");
+	log_printf(LOG_INFO, "Trivial Torrent (build %s %s) by %s", __DATE__, __TIME__, "Y. CORDERO and A. VARGAS");
+	// printf("File name: %s", argv[1]);
 
 	// ==========================================================================
 	// Parse command line
 	// ==========================================================================
 
 	// TODO: some magical lines of code here that call other functions and do various stuff.
+
+	struct torrent_t* torrent;
+	int n = create_torrent_from_metainfo_file("test_file.ttorrent", torrent, argv[1]);
+	if(n == -1){
+		perror("error");
+		return 1;
+	}
+	
 
 	// The following statements most certainly will need to be deleted at some point...
 	(void) argc;
