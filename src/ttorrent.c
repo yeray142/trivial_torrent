@@ -12,6 +12,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <inttypes.h>
+#include <stdlib.h>
 
 // TODO: hey!? what is this?
 
@@ -75,36 +77,46 @@ int clientFunc(char *argv) {
 		servAddr.sin_addr.s_addr = INADDR_ANY;
 		servAddr.sin_port = torrent.peers[i].peer_port;
 		
-		printf("Connecting to PORT: %i \n", ntohs(torrent.peers[i].peer_port));
+		printf("Connecting to peer #%i... \n", i);
 		if(connect(sock, (const struct sockaddr *) &servAddr, sizeof(servAddr)) == -1)
-			perror("Connection error");
+			perror("... connection failed");
 		else {
-			printf("Successfully connected to the server...\n");
-			
-			// For each incorrect block in the downloaded file.
-			//
-			// i. Send a request to the server peer.
-			// ii. If the server responds with the block, store it to the downloaded file.
-			// iii. Otherwise, if the server signals the unavailablity of the block, do nothing.
-			//
-			
-			struct message_t message;
-			message.magic_number = ntohl(MAGIC_NUMBER);
-			message.message_code = MSG_REQUEST;
-			
-			struct message_t response;
 			for (uint64_t j = 0; j < torrent.block_count; j++){
-				// printf("%li\n", message.block_number);
-				message.block_number = j;
-				if(send(sock, &message, sizeof(message), MSG_OOB) == -1)
-					perror("Send error");
-				else
-					printf("Successfully sent: %i %i %ld \n", ntohl(message.magic_number), message.message_code, message.block_number);
 				
-				if(recv(sock, &response, sizeof(response), MSG_PEEK) == -1)
+				uint8_t message[RAW_MESSAGE_SIZE]; 
+				printf("	Init serialization...\n");
+				message[0] = (uint8_t) ((MAGIC_NUMBER >> 24) & 0xff); 
+				message[1] = (uint8_t) ((MAGIC_NUMBER >> 16) & 0xff);	
+				message[2] = (uint8_t) ((MAGIC_NUMBER >> 8) & 0xff);
+ 				message[3] = (uint8_t) (MAGIC_NUMBER & 0xff);	
+				message[4] = MSG_REQUEST; 						// Message code!
+				message[5] = (uint8_t) ((j >> 56) & 0xff);
+				message[6] = (uint8_t) ((j >> 48) & 0xff);
+				message[7] = (uint8_t) ((j >> 40) & 0xff);
+				message[8] = (uint8_t) ((j >> 32) & 0xff);
+				message[9] = (uint8_t) ((j >> 24) & 0xff);
+				message[10] = (uint8_t) ((j >> 16) & 0xff);
+				message[11] = (uint8_t) ((j >> 8) & 0xff);
+				message[12] = (uint8_t) (j & 0xff);				// Block number!
+				printf("	End of serialization...\n");
+
+				printf("	Requesting block { magic_number = %08" PRIx32 ", block_number =  %li, message_code = %i}\n", MAGIC_NUMBER, j, MSG_REQUEST);
+				if (send(sock, &message, sizeof(message), 0) == -1)
+					perror("Send error");
+
+				uint8_t response[RAW_MESSAGE_SIZE+MAX_BLOCK_SIZE]; 
+				printf("	Waiting for response...\n");
+				if(recv(sock, response, sizeof(response), 0) == -1)
 					perror("Receive error");
 				else
-					printf("Message received: %i", response.message_code);
+					printf("	Message received...\n");
+
+				printf("	Init deserialization...\n");
+				uint32_t magic = (uint32_t) (response[3] | (response[2] << 8) | (response[1] << 16) | (response[0] << 24));
+				uint8_t code = response[4];
+				uint64_t nBlock = (uint64_t) (response[12] | (response[11] << 8) | (response[10] << 16) | (response[9] << 24)); // | (response[8] << 32) | (response[7] << 40) | (response[6] << 48) | (response[5] << 56));
+				printf("	End of deserialization...\n ");
+				printf("	Received message { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}\n", magic, nBlock, code);       
 			}
 		}
 		
@@ -114,6 +126,8 @@ int clientFunc(char *argv) {
 		}
 	}
 	
+	printf("Ending clientside...\n");
+
 	(void) argv;
 	return 0;
 }
