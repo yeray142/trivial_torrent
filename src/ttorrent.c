@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <sys/socket.h>
 #include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
 
 // TODO: hey!? what is this?
 
@@ -63,23 +65,23 @@ int main(int argc, char **argv) {
 	int sock;
 	struct sockaddr_in clientAddr;
 	int retConnect;
-	for (int i = 0; i < torrent.peer_count; i++){
+	for (int i = 0; i < (int) torrent.peer_count; i++){
+	
+		// printf("Adress: %i", torrent.peers[i].peer_address[0]);
 		sock = socket(AF_INET,SOCK_STREAM,0);
 		if ( sock == -1 ){
 			perror("Socket error");
 			return 1;
 		}
 		clientAddr.sin_family = AF_INET;
-		clientAddr.sin_addr.s_addr = htons(torrent.peers[i].peer_address);
-		clientAddr.sin_port = htons(torrent.peers[i].peer_port);
-		retConnect =connect(sock, &clientAddr, sizeof(clientAddr));
+		clientAddr.sin_addr.s_addr = torrent.peers[i].peer_address;
+		clientAddr.sin_port = torrent.peers[i].peer_port;
+		retConnect =connect(sock, (const struct sockaddr *) &clientAddr, sizeof(clientAddr));
 		if(retConnect == -1){
 			perror("Connection error");
 			return 1;
 		}
 		//torrent.peers[i].peer_port
-		
-		
 		
 		
 		if(close(sock) == -1){
