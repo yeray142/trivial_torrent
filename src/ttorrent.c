@@ -58,6 +58,10 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 	
+	for (i = 0; i < torrent.peer_count; i++){
+		print(torrent.peers[i].peer_port);
+	}
+	
 
 	// The following statements most certainly will need to be deleted at some point...
 	(void) argc;
