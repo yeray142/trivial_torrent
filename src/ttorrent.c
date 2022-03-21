@@ -41,6 +41,8 @@ int main(int argc, char **argv) {
 
 	// TODO: some magical lines of code here that call other functions and do various stuff.
 	// Check if client or server using argc and argv.
+	
+
 	struct torrent_t torrent;
 	char downloaded_name[2048];
 	for (int i = 0; i < (int) strlen((const char *) argv[1]); i++) {
@@ -58,8 +60,32 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 	
-	for (i = 0; i < torrent.peer_count; i++){
-		print(torrent.peers[i].peer_port);
+	int sock;
+	struct sockaddr_in clientAddr;
+	int retConnect;
+	for (int i = 0; i < torrent.peer_count; i++){
+		sock = socket(AF_INET,SOCK_STREAM,0);
+		if ( sock == -1 ){
+			perror("Socket error");
+			return 1;
+		}
+		clientAddr.sin_family = AF_INET;
+		clientAddr.sin_addr.s_addr = htons(torrent.peers[i].peer_address);
+		clientAddr.sin_port = htons(torrent.peers[i].peer_port);
+		retConnect =connect(sock, &clientAddr, sizeof(clientAddr));
+		if(retConnect == -1){
+			perror("Connection error");
+			return 1;
+		}
+		//torrent.peers[i].peer_port
+		
+		
+		
+		
+		if(close(sock) == -1){
+			perror("Closing error");
+			return 1;
+		}
 	}
 	
 
