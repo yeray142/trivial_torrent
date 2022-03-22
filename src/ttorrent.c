@@ -62,6 +62,8 @@ int clientFunc(char *argv) {
 		return 1;
 	}
 	
+	printf("Mida fitxer: %li\n", torrent.downloaded_file_size);
+	
 	int sock;
 	struct sockaddr_in servAddr;
 	for (int i = 0; i < (int) torrent.peer_count; i++){
@@ -84,7 +86,7 @@ int clientFunc(char *argv) {
 			for (uint64_t j = 0; j < torrent.block_count; j++){
 				
 				uint8_t message[RAW_MESSAGE_SIZE]; 
-				printf("	Init serialization...\n");
+				printf("	Start of serialization...\n");
 				message[0] = (uint8_t) ((MAGIC_NUMBER >> 24) & 0xff); 	// Magic number
 				message[1] = (uint8_t) ((MAGIC_NUMBER >> 16) & 0xff);	
 				message[2] = (uint8_t) ((MAGIC_NUMBER >> 8) & 0xff);
@@ -104,20 +106,20 @@ int clientFunc(char *argv) {
 				if (send(sock, &message, sizeof(message), 0) == -1)
 					perror("Send error");
 				else { 
-					printf("	Mida missatge enviat: %li\n", sizeof(message));
+					printf("	Sent message size: %li\n", sizeof(message));
 					
 					// sleep(5);
 					
 					uint8_t response[13]; 
 					printf("	Waiting for response...\n");
-					ssize_t n = recv(sock, response, sizeof(response), 0);
+					ssize_t n = recv(sock, response, sizeof(response), MSG_WAITALL);
 					if(n == -1)
 						perror("Receive error");
 					else {
 						printf("	Message received...\n");
 						printf("	Received message size: %li\n", n);
 
-						printf("	Init deserialization...\n");
+						printf("	Start of deserialization...\n");
 						uint32_t magic = (uint32_t) (response[3] | (response[2] << 8) | (response[1] << 16) | (response[0] << 24));
 						uint8_t code = response[4];
 						uint64_t nBlock = (uint64_t) (response[12] | (response[11] << 8) | (response[10] << 16) | (response[9] << 24)); // | (response[8] << 32) | (response[7] << 40) | (response[6] << 48) | (response[5] << 56));
@@ -137,7 +139,7 @@ int clientFunc(char *argv) {
 								for (ssize_t k = 0; k < n_block; k++)
 									block.data[k] = response_block[k];
 								block.size = (size_t) n_block;
-								printf("		Block data: { block.size = %li %li; block.data[0] = %i }\n", block.size, n_block, block.data[0]);
+								printf("		Block data: { block.size = %li; block.data[0] = %i }\n", block.size, block.data[0]);
 								if (store_block(&torrent, j, &block) == -1)
 									perror("	Storing block error...");
 							}
