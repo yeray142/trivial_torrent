@@ -29,12 +29,12 @@ static const uint8_t MSG_RESPONSE_NA = 2;
 
 enum { RAW_MESSAGE_SIZE = 13 };
 
-struct message_t {
-	uint32_t magic_number;
-	uint8_t message_code;
-	uint64_t block_number;
-	uint8_t payload[RAW_MESSAGE_SIZE];
-};
+//struct message_t {
+// 	uint32_t magic_number;
+// 	uint8_t message_code;
+// 	uint64_t block_number;
+// 	uint8_t payload[RAW_MESSAGE_SIZE];
+//};
 
 // To get rid of some warnings
 int clientFunc(char *argv);
@@ -91,7 +91,7 @@ int clientFunc(char *argv) {
 				message[1] = (uint8_t) ((MAGIC_NUMBER >> 16) & 0xff);	
 				message[2] = (uint8_t) ((MAGIC_NUMBER >> 8) & 0xff);
  				message[3] = (uint8_t) (MAGIC_NUMBER & 0xff);	
-				message[4] = MSG_REQUEST; 					// Message code
+				message[4] = MSG_REQUEST; 							// Message code
 				message[5] = (uint8_t) ((j >> 56) & 0xff);			// Block number
 				message[6] = (uint8_t) ((j >> 48) & 0xff);
 				message[7] = (uint8_t) ((j >> 40) & 0xff);
@@ -112,7 +112,7 @@ int clientFunc(char *argv) {
 					
 					uint8_t response[13]; 
 					printf("	Waiting for response...\n");
-					ssize_t n = recv(sock, response, sizeof(response), MSG_WAITALL);
+					ssize_t n = recv(sock, &response, sizeof(response), 0);
 					if(n == -1)
 						perror("Receive error");
 					else {
@@ -129,8 +129,11 @@ int clientFunc(char *argv) {
 						if (magic == MAGIC_NUMBER && code == MSG_RESPONSE_OK) {
 							printf("		Block available...\n");
 							
-							uint8_t response_block[65536];
-							ssize_t n_block = recv(sock, response_block, sizeof(response_block), 0);
+							size_t size = 65536;
+							if (j == (torrent.block_count -1 ))
+								size = torrent.downloaded_file_size - (torrent.block_count - 1)*65536;
+							uint8_t response_block[size];
+							ssize_t n_block = recv(sock, &response_block, sizeof(response_block), MSG_WAITALL);
 							if (n_block == -1)
 								perror("Receive block error");
 							else {
@@ -138,6 +141,7 @@ int clientFunc(char *argv) {
 								struct block_t  block;
 								for (ssize_t k = 0; k < n_block; k++)
 									block.data[k] = response_block[k];
+									
 								block.size = (size_t) n_block;
 								printf("		Block data: { block.size = %li; block.data[0] = %i }\n", block.size, block.data[0]);
 								if (store_block(&torrent, j, &block) == -1)
@@ -204,8 +208,4 @@ int main(int argc, char **argv) {
 
 	return 0;
 }
-
-
-
-
 
