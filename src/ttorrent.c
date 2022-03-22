@@ -89,8 +89,8 @@ int clientFunc(char *argv) {
 				message[1] = (uint8_t) ((MAGIC_NUMBER >> 16) & 0xff);	
 				message[2] = (uint8_t) ((MAGIC_NUMBER >> 8) & 0xff);
  				message[3] = (uint8_t) (MAGIC_NUMBER & 0xff);	
-				message[4] = MSG_REQUEST; 								// Message code
-				message[5] = (uint8_t) ((j >> 56) & 0xff);				// Block number
+				message[4] = MSG_REQUEST; 					// Message code
+				message[5] = (uint8_t) ((j >> 56) & 0xff);			// Block number
 				message[6] = (uint8_t) ((j >> 48) & 0xff);
 				message[7] = (uint8_t) ((j >> 40) & 0xff);
 				message[8] = (uint8_t) ((j >> 32) & 0xff);
@@ -105,10 +105,10 @@ int clientFunc(char *argv) {
 					perror("Send error");
 				else { 
 					printf("	Mida missatge enviat: %li\n", sizeof(message));
-
-					sleep(5); 		// Waiting for server
-
-					uint8_t response[65549]; 
+					
+					// sleep(5);
+					
+					uint8_t response[13]; 
 					printf("	Waiting for response...\n");
 					ssize_t n = recv(sock, response, sizeof(response), 0);
 					if(n == -1)
@@ -122,20 +122,25 @@ int clientFunc(char *argv) {
 						uint8_t code = response[4];
 						uint64_t nBlock = (uint64_t) (response[12] | (response[11] << 8) | (response[10] << 16) | (response[9] << 24)); // | (response[8] << 32) | (response[7] << 40) | (response[6] << 48) | (response[5] << 56));
 						printf("	End of deserialization...\n ");
-
+						
 						printf("	Received message { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}\n", magic, nBlock, code);
 						if (magic == MAGIC_NUMBER && code == MSG_RESPONSE_OK) {
 							printf("		Block available...\n");
 							
-							// If the server responds with the block, store it to the downloaded file.
-							struct block_t  block;
-							for (ssize_t k = 0; k < (n - 13); k++) {
-								block.data[k] = response[13 + k];
-							}  
-							block.size = (size_t) n - 13;
-							printf("		Block data: { block.size = %li %li; block.data[0] = %i }\n", block.size, n, block.data[0]);
-							if (store_block(&torrent, j, &block) == -1)
-								perror("	Storing block error...");
+							uint8_t response_block[65536];
+							ssize_t n_block = recv(sock, response_block, sizeof(response_block), 0);
+							if (n_block == -1)
+								perror("Receive block error");
+							else {
+								// If the server responds with the block, store it to the downloaded file.
+								struct block_t  block;
+								for (ssize_t k = 0; k < n_block; k++)
+									block.data[k] = response_block[k];
+								block.size = (size_t) n_block;
+								printf("		Block data: { block.size = %li %li; block.data[0] = %i }\n", block.size, n_block, block.data[0]);
+								if (store_block(&torrent, j, &block) == -1)
+									perror("	Storing block error...");
+							}
 						} 
 						else
 							printf("		Block not available...\n");
