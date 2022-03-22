@@ -106,7 +106,7 @@ int clientFunc(char *argv) {
 				else { 
 					printf("	Mida missatge enviat: %li\n", sizeof(message));
 
-					sleep(1); 		// Waiting for server
+					sleep(5); 		// Waiting for server
 
 					uint8_t response[65549]; 
 					printf("	Waiting for response...\n");
