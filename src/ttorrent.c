@@ -225,6 +225,24 @@ int clientFunc(char *argv) {
  */
 int serverFunc(char **argv) {
 	log_printf(LOG_INFO, "Executing server...");
+
+	/* 1- Create socket and change it to NON_BLOCKING
+	2- Binding and listening.
+	3- fds[] array (poll_fd)
+	4- Infinite loop:
+		a) Polling (poll())
+		b) Loop through fds[]
+			1. Si fds[i] == S:
+				a. Accept connection
+				b. Append fds[]
+			2. Sino:
+				a. m = recv(fds[i])
+				b. si (m == 0):
+					1. close()
+					2. send()
+	
+
+*/ 
 	
 	(void) argv;
 	return 0;
