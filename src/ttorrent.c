@@ -13,6 +13,8 @@
 #include <arpa/inet.h>
 #include <inttypes.h>
 #include <stdlib.h>
+#include <fcntl.h>
+#include <poll.h>
 
 // TODO: hey!? what is this?
 
@@ -34,7 +36,8 @@ int serverFunc(char *port, char *metainfo_file);
 void removeExtension(char* downloaded_name, const char* file_name);
 void serialize(uint8_t *buffer, const uint32_t magicNumber, const uint8_t code, const uint64_t bock_number);
 void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_number, const uint8_t *buffer);
-int torrent_creation(struct torrent_t* torrent, const char *metainfo_file);
+int torrent_creation(struct torrent_t *torrent, const char *metainfo_file);
+int listening_socket(const char *port);
 
 
 /**
@@ -114,12 +117,12 @@ void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_
 
 
 /**
- * Deserializes all the buffer's data.
- * @param magic_number is where the magic number will be stored.
- * @param code is where the message code (MST_RESPONSE_OK...) will be stored.
+ * Creates the torrent from the metainfo file.
+ * @param torrent is the torrent struct that will store the data.
+ * @param metainfo_file is the metainfo_file's name string.
  * @return -1 if there is an error or 0 if it was executed successfully.
  */
-int torrent_creation(struct torrent_t* torrent, const char *metainfo_file) {
+int torrent_creation(struct torrent_t *torrent, const char *metainfo_file) {
 	char downloaded_name[strlen(metainfo_file)];
 	removeExtension((char *) &downloaded_name, metainfo_file);
 	
@@ -128,6 +131,45 @@ int torrent_creation(struct torrent_t* torrent, const char *metainfo_file) {
 		return -1;
 	}
 	return 0;
+}
+
+
+/**
+ * Creates socket, sets it to non-blocking, binds it and calls listen().
+ * @param port is the connection port that the socket has to be bound to.
+ * @return -1 if there is an error or the socket's file descriptor if it was executed successfully.
+ */
+int listening_socket(const char *port) {
+	int sock = socket(AF_INET, SOCK_STREAM, 0);
+	if (sock == -1) {
+		perror("Socket creation failed");
+		return -1;
+	}
+
+	if (fcntl(sock, F_SETFL, O_NONBLOCK) == -1) {
+		perror("Setting socket to non-blocking failed");
+		return -1;
+	}
+	log_printf(LOG_INFO, "	socket ok");
+
+	struct sockaddr_in servAddr;
+	servAddr.sin_family = AF_INET;
+	servAddr.sin_addr.s_addr = INADDR_ANY;
+	servAddr.sin_port = htons((uint16_t)strtol(port, NULL, 10));
+
+	if (bind(sock, (const struct sockaddr *) &servAddr, sizeof(servAddr)) == -1) {
+		perror("Socket bound failed");
+		return -1;
+	}
+	log_printf(LOG_INFO, "	bind ok");
+
+	if (listen(sock, 0) == -1) {
+		perror("Socket listening failed");
+		return -1;
+	}
+	log_printf(LOG_INFO, "	listen ok");
+
+	return sock;
 }
 
 
@@ -245,9 +287,10 @@ int serverFunc(char *port, char *metainfo_file) {
 
 	log_printf(LOG_INFO, "Total file size: %li", torrent.downloaded_file_size);
 
+	int sock = listening_socket(port);
+	if (sock == -1)
+		return -1;
 /* 
-	1- Create socket and change it to NON_BLOCKING
-	2- Binding and listening.
 	3- fds[] array (poll_fd)
 	4- Infinite loop:
 		a) Polling (poll())
@@ -259,6 +302,7 @@ int serverFunc(char *port, char *metainfo_file) {
 				a. m = recv(fds[i])
 				b. If (m == 0):
 					1. close()
+					2. remove fds
 				c. Else:
 					1. send()	
 */ 
