@@ -30,10 +30,11 @@ enum { RAW_MESSAGE_SIZE = 13 };
 
 // To get rid of some warnings
 int clientFunc(char *argv);
-int serverFunc(char **argv);
+int serverFunc(char *port, char *metainfo_file);
 void removeExtension(char* downloaded_name, const char* file_name);
 void serialize(uint8_t *buffer, const uint32_t magicNumber, const uint8_t code, const uint64_t bock_number);
 void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_number, const uint8_t *buffer);
+int torrent_creation(struct torrent_t* torrent, const char *metainfo_file);
 
 
 /**
@@ -113,20 +114,32 @@ void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_
 
 
 /**
+ * Deserializes all the buffer's data.
+ * @param magic_number is where the magic number will be stored.
+ * @param code is where the message code (MST_RESPONSE_OK...) will be stored.
+ * @return -1 if there is an error or 0 if it was executed successfully.
+ */
+int torrent_creation(struct torrent_t* torrent, const char *metainfo_file) {
+	char downloaded_name[strlen(metainfo_file)];
+	removeExtension((char *) &downloaded_name, metainfo_file);
+	
+	if(create_torrent_from_metainfo_file((const char *) metainfo_file, (struct torrent_t *) torrent, (const char *) &downloaded_name) == -1) {
+		perror("Torrent creation from metainfo file failed");
+		return -1;
+	}
+	return 0;
+}
+
+
+/**
  * Client function.
  */
 int clientFunc(char *argv) {
 	log_printf(LOG_INFO, "Executing client...");
 	
 	struct torrent_t torrent;
-	
-	char downloaded_name[strlen(argv)];
-	removeExtension((char *) &downloaded_name, argv);
-	
-	if(create_torrent_from_metainfo_file((const char *) argv, (struct torrent_t *) &torrent, (const char *) &downloaded_name) == -1){
-		perror("Torrent creation from metainfo file failed");
-		return 1;
-	}
+	if (torrent_creation(&torrent, argv) == -1)
+		return -1;
 	
 	log_printf(LOG_INFO, "Total file size: %li", torrent.downloaded_file_size);
 	
@@ -136,7 +149,7 @@ int clientFunc(char *argv) {
 		sock = socket(AF_INET, SOCK_STREAM, 0);
 		if ( sock == -1 ){
 			perror("Socket creation failed");
-			return 1;
+			return -1;
 		}
 		
 		struct peer_information_t peer = torrent.peers[i];
@@ -210,7 +223,7 @@ int clientFunc(char *argv) {
 		
 		if(close(sock) == -1) {
 			perror("Socket closing failed");
-			return 1;
+			return -1;
 		}
 	}
 	
@@ -223,28 +236,36 @@ int clientFunc(char *argv) {
 /**
  * Server function.
  */
-int serverFunc(char **argv) {
+int serverFunc(char *port, char *metainfo_file) {
 	log_printf(LOG_INFO, "Executing server...");
 
-	/* 1- Create socket and change it to NON_BLOCKING
+	struct torrent_t torrent;
+	if (torrent_creation(&torrent, metainfo_file) == -1)
+		return -1;
+
+	log_printf(LOG_INFO, "Total file size: %li", torrent.downloaded_file_size);
+
+/* 
+	1- Create socket and change it to NON_BLOCKING
 	2- Binding and listening.
 	3- fds[] array (poll_fd)
 	4- Infinite loop:
 		a) Polling (poll())
 		b) Loop through fds[]
-			1. Si fds[i] == S:
+			1. If fds[i] == S:
 				a. Accept connection
 				b. Append fds[]
-			2. Sino:
+			2. Else:
 				a. m = recv(fds[i])
-				b. si (m == 0):
+				b. If (m == 0):
 					1. close()
-					2. send()
-	
-
+				c. Else:
+					1. send()	
 */ 
 	
-	(void) argv;
+	(void) metainfo_file;
+	(void) port;
+
 	return 0;
 }
 
@@ -266,7 +287,7 @@ int main(int argc, char **argv) {
 	
 	// Check if client or server using argc and argv.
 	if (argv[1][0] == '-' && argv[1][1] == 'l')
-		serverFunc(argv);
+		serverFunc(argv[2], argv[3]);
 	else
 		clientFunc(argv[1]);
 
