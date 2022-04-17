@@ -28,7 +28,8 @@ static const uint8_t MSG_REQUEST = 0;
 static const uint8_t MSG_RESPONSE_OK = 1;
 static const uint8_t MSG_RESPONSE_NA = 2;
 
-enum { RAW_MESSAGE_SIZE = 13 };
+enum { 	RAW_MESSAGE_SIZE = 13,
+		MAX_CLIENTS_PER_SERVER = 1024};
 
 // To get rid of some warnings
 int clientFunc(char *argv);
@@ -292,13 +293,14 @@ int serverFunc(char *port, char *metainfo_file) {
 		return -1;
 
 	nfds_t nfds = 0;
-	struct pollfd fds[5];
+	struct pollfd fds[MAX_CLIENTS_PER_SERVER];
 
-	fds[0].fd = sock;
-	fds[0].events = POLLIN;
+	fds[nfds].fd = sock;
+	fds[nfds].events = POLLIN;
 	nfds++;
 
 	while (1) {
+		// a) Polling (poll())
 		log_printf(LOG_INFO, "	polling...");
 		int x = poll(fds, nfds, -1);
 		if (x == -1) {
@@ -306,53 +308,58 @@ int serverFunc(char *port, char *metainfo_file) {
 			return -1;
 		}
 		else {
+			// b) Loop through fds[]
 			log_printf(LOG_INFO, " 	...poll has returned with events...");
 			nfds_t n = nfds;
 			for (nfds_t i = 0; i < n; i++) {
 				log_printf(LOG_INFO, "		...processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, fds[i].revents);
-				struct sockaddr clientAddr;
-				socklen_t size;
-				int s1 = accept(sock, &clientAddr, &size);
-				if (s1 == -1)
-					perror("		accept failed");
+				if (fds[i].fd == sock) {
+					
+					// a. s1 = accept(...);
+					// b. fds.append(s1);
+
+					struct sockaddr clientAddr;
+					socklen_t size;
+					int s1 = accept(sock, &clientAddr, &size);
+					if (s1 == -1)
+						perror("		accept failed");
+					else {
+						log_printf(LOG_INFO, "			accept ok");
+
+						int option_value = 13;
+						if (setsockopt(s1, IPPROTO_TCP, SO_RCVLOWAT, &option_value, sizeof(option_value)) == -1)
+							perror("			setsockopt failed");
+						else
+							log_printf(LOG_INFO, "			setsockopt[SO_RCVLOWAT=13] successful");
+
+						if (fcntl(s1, F_SETFL, O_NONBLOCK) == -1)
+							perror("			fcntl failed");
+						else
+							log_printf(LOG_INFO, "			fcntl[O_NONBLOCK] successful");
+
+						fds[nfds].fd = s1;
+						nfds++;
+					}
+				}
 				else {
-					log_printf(LOG_INFO, "			accept ok");
-
-					int option_value = 13;
-					if (setsockopt(s1, IPPROTO_TCP, SO_RCVLOWAT, &option_value, sizeof(option_value)) == -1)
-						perror("			setsockopt failed");
-					else
-						log_printf(LOG_INFO, "			setsockopt[SO_RCVLOWAT=13] successful");
-
-					if (fcntl(s1, F_SETFL, O_NONBLOCK) == -1)
-						perror("			fcntl failed");
-					else
-						log_printf(LOG_INFO, "			fcntl[O_NONBLOCK] successful");
-
-					fds[nfds].fd = s1;
-					nfds++;
+					// a. m = recv(fds[i]);
+					uint8_t response[RAW_MESSAGE_SIZE];
+					ssize_t m = recv(fds[i].fd, &response, sizeof(response), 0);
+					if (m == 0) {
+						//	1. close(...);
+						close(fds[i].fd);
+						
+						//	2. remove_fds(...);
+						fds[i].fd = 0;
+						nfds--;
+					}
+					else {
+						//	1. send(...);
+					}
 				}
 			}
-
 		}
 	}
-
-/*
-	3- fds[] array (poll_fd)
-	4- Infinite loop:
-		a) Polling (poll())
-		b) Loop through fds[]
-			1. If fds[i] == S:
-				a. Accept connection
-				b. Append fds[]
-			2. Else:
-				a. m = recv(fds[i])
-				b. If (m == 0):
-					1. close()
-					2. remove fds
-				c. Else:
-					1. send()
-*/
 
 	(void) metainfo_file;
 	(void) port;
