@@ -68,7 +68,7 @@ void removeExtension(char* downloaded_name, const char* file_name) {
  * @return void.
  */
 void serialize(uint8_t *buffer, const uint32_t magicNumber, const uint8_t code, const uint64_t block_number) {
-	log_printf(LOG_INFO, "	Start of serialization...");
+	// log_printf(LOG_INFO, "	Start of serialization...");
 
 	// Serialize MAGIC NUMBER:
 	for (int i = 0; i < 4; i++)
@@ -81,7 +81,7 @@ void serialize(uint8_t *buffer, const uint32_t magicNumber, const uint8_t code, 
 	for (int i = 5; i < 13; i++)
 		buffer[i] = (uint8_t) ((block_number >> (64 - (i-4)*8)) & 0xff);
 
-	log_printf(LOG_INFO,"	...end of serialization");
+	// log_printf(LOG_INFO,"	...end of serialization");
 }
 
 
@@ -94,7 +94,7 @@ void serialize(uint8_t *buffer, const uint32_t magicNumber, const uint8_t code, 
  * @return void.
  */
 void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_number, const uint8_t *buffer) {
-	log_printf(LOG_INFO, "	Start of deserialization...");
+	// log_printf(LOG_INFO, "	Start of deserialization...");
 
 	// Deserialize MAGIC NUMBER:
 	*magic_number = 0;
@@ -113,7 +113,7 @@ void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_
 		*block_number |= (uint64_t) buffer[i+5];
 	}
 
-	log_printf(LOG_INFO, "	...end of deserialization");
+	// log_printf(LOG_INFO, "	...end of deserialization");
 }
 
 
@@ -292,9 +292,9 @@ int serverFunc(char *port, char *metainfo_file) {
 	if (sock == -1)
 		return -1;
 
+	struct pollfd fds[MAX_CLIENTS_PER_SERVER + 1];
+	
 	nfds_t nfds = 0;
-	struct pollfd fds[MAX_CLIENTS_PER_SERVER];
-
 	fds[nfds].fd = sock;
 	fds[nfds].events = POLLIN;
 	nfds++;
@@ -312,49 +312,78 @@ int serverFunc(char *port, char *metainfo_file) {
 			log_printf(LOG_INFO, " 	...poll has returned with events...");
 			nfds_t n = nfds;
 			for (nfds_t i = 0; i < n; i++) {
-				log_printf(LOG_INFO, "		...processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, fds[i].revents);
-				if (fds[i].fd == sock) {
-					
-					// a. s1 = accept(...);
-					// b. fds.append(s1);
+				if (fds[i].revents > 0) {
+					if (fds[i].fd == sock) {
+						log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, fds[i].revents);
+						log_printf(LOG_INFO, "		New connection incoming");
+						struct sockaddr clientAddr;
+						socklen_t size;
 
-					struct sockaddr clientAddr;
-					socklen_t size;
-					int s1 = accept(sock, &clientAddr, &size);
-					if (s1 == -1)
-						perror("		accept failed");
-					else {
-						log_printf(LOG_INFO, "			accept ok");
+						int s1 = accept(sock, &clientAddr, &size);
+						if (s1 == -1)
+							perror("			accept failed");
+						else {
+							log_printf(LOG_INFO, "			accept ok");
 
-						int option_value = 13;
-						if (setsockopt(s1, IPPROTO_TCP, SO_RCVLOWAT, &option_value, sizeof(option_value)) == -1)
-							perror("			setsockopt failed");
-						else
-							log_printf(LOG_INFO, "			setsockopt[SO_RCVLOWAT=13] successful");
+							int option_value = 13;
+							if (setsockopt(s1, IPPROTO_TCP, SO_RCVLOWAT, &option_value, sizeof(option_value)) == -1)
+								perror("			setsockopt failed");
+							else
+								log_printf(LOG_INFO, "			setsockopt[SO_RCVLOWAT=13] successful");
 
-						if (fcntl(s1, F_SETFL, O_NONBLOCK) == -1)
-							perror("			fcntl failed");
-						else
-							log_printf(LOG_INFO, "			fcntl[O_NONBLOCK] successful");
+							if (fcntl(s1, F_SETFL, O_NONBLOCK) == -1)
+								perror("			fcntl failed");
+							else
+								log_printf(LOG_INFO, "			fcntl[O_NONBLOCK] successful");
 
-						fds[nfds].fd = s1;
-						nfds++;
-					}
-				}
-				else {
-					// a. m = recv(fds[i]);
-					uint8_t response[RAW_MESSAGE_SIZE];
-					ssize_t m = recv(fds[i].fd, &response, sizeof(response), 0);
-					if (m == 0) {
-						//	1. close(...);
-						close(fds[i].fd);
-						
-						//	2. remove_fds(...);
-						fds[i].fd = 0;
-						nfds--;
+							fds[nfds].fd = s1;
+							fds[nfds].events = POLLIN;
+							nfds++;
+						}
 					}
 					else {
-						//	1. send(...);
+						log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, fds[i].revents);
+						uint8_t message[RAW_MESSAGE_SIZE];
+						if (recv(fds[i].fd, &message, sizeof(message), 0) == -1) {
+							log_printf(LOG_INFO, "			client closed connection");
+							close(fds[i].fd);
+							
+							fds[i].fd = 0;
+							nfds--;
+						}
+						else {
+							log_printf(LOG_INFO, "			received message from client");
+							uint32_t magic; uint8_t code; uint64_t nBlock;
+							deserialize(&magic, &code, &nBlock, (const uint8_t*) &message);
+							log_printf(LOG_INFO, "			Request is { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", magic, nBlock, code);
+
+							if (torrent.block_map[nBlock] == 1) {
+								// Block available:
+								struct block_t block;
+								if (load_block(&torrent, nBlock, &block) == -1)
+										perror("		Block storing failed...");
+
+								uint8_t responseWithBlock[MAX_BLOCK_SIZE + RAW_MESSAGE_SIZE];
+								serialize((uint8_t*) &responseWithBlock, MAGIC_NUMBER, MSG_RESPONSE_OK, nBlock);
+								for (ssize_t k = 0; k < MAX_BLOCK_SIZE; k++)
+									responseWithBlock[k + RAW_MESSAGE_SIZE] = block.data[k];
+
+								if (send(fds[i].fd, &responseWithBlock, sizeof(responseWithBlock), 0) == -1)
+									perror("			Message sending failed");
+								else
+									log_printf(LOG_INFO, "			Response has been { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", MAGIC_NUMBER, nBlock, MSG_RESPONSE_OK);
+							}
+							else {
+								// Block not available:
+								uint8_t response[RAW_MESSAGE_SIZE];
+								serialize((uint8_t*) &response, MAGIC_NUMBER, MSG_RESPONSE_NA, nBlock);
+
+								if (send(fds[i].fd, &response, sizeof(response), 0) == -1)
+									perror("			Message sending failed");
+								else
+									log_printf(LOG_INFO, "			Response has been { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", MAGIC_NUMBER, nBlock, MSG_RESPONSE_NA);
+							}
+						}
 					}
 				}
 			}
