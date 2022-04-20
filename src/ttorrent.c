@@ -308,6 +308,8 @@ int serverFunc(char *port, char *metainfo_file) {
     	fds[i].revents = 0;	// Events in place
     }
 
+	int64_t polloutResponses[MAX_CLIENTS_PER_SERVER] = {-1}; // Block numbers to handle for each client.
+
 	// 4. Polling loop:
 	while (1) {
 		log_printf(LOG_INFO, "	polling...");
@@ -333,10 +335,8 @@ int serverFunc(char *port, char *metainfo_file) {
 					socklen_t size = sizeof(clientAddr);
 
 					int s1 = accept(sock, &clientAddr, &size);
-					if (s1 == -1) {
+					if (s1 == -1)
 						perror("			accept failed");
-						continue;	// Skip this iteration.
-					}
 					else {
 						log_printf(LOG_INFO, "			accept ok");
 
@@ -364,16 +364,16 @@ int serverFunc(char *port, char *metainfo_file) {
 							nfds++;
 						}
 						else
-							close(s1);
-						continue; // Skip iteration.
+							close(s1);		
 					}
+					continue; // Skip iteration.
 				}
 				else if (fds[i].fd == sock)
 					continue;
 
 				// We can ensure it is an ordinary file descriptor:
-				log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, fds[i].revents);
 				if (fds[i].revents & POLLIN) { // Attend POLLIN events.
+					log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, POLLIN);
 					log_printf(LOG_INFO, "		POLLIN event");
 					uint8_t message[RAW_MESSAGE_SIZE];
 
@@ -397,6 +397,9 @@ int serverFunc(char *port, char *metainfo_file) {
 
 					if (torrent.block_map[nBlock] == 1) {
 						// Block available:
+						polloutResponses[i - 1] = (int64_t) nBlock;
+						
+						/*
 						struct block_t block;
 						if (load_block(&torrent, nBlock, &block) == -1) {
 							perror("		Block storing failed...");
@@ -412,10 +415,11 @@ int serverFunc(char *port, char *metainfo_file) {
 							perror("			Message sending failed");
 							continue;
 						}
+						*/
 
 						log_printf(LOG_INFO, "			Response will be { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", MAGIC_NUMBER, nBlock, MSG_RESPONSE_OK);
 						log_printf(LOG_INFO, "			(we will handle this later; marking this fd for POLLOUT");
-						// fds[i].events |= POLLOUT;
+						fds[i].events = POLLOUT;
 					}
 					else {
 						// Block not available:
@@ -429,7 +433,35 @@ int serverFunc(char *port, char *metainfo_file) {
 					}
 				}
 				else if (fds[i].revents & POLLOUT) { // Attend POLLOUT events.
+					log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, POLLOUT);
 					log_printf(LOG_INFO, "		POLLOUT event");
+					
+					uint64_t nBlock = (uint64_t) polloutResponses[i-1];
+					polloutResponses[i-1] = -1;
+
+					struct block_t block;
+					if (load_block(&torrent, nBlock, &block) == -1) {
+						perror("		Block storing failed...");
+						continue;
+					}
+
+					size_t size = MAX_BLOCK_SIZE;
+					if (nBlock == (torrent.block_count - 1))
+						size = torrent.downloaded_file_size - (torrent.block_count - 1)*MAX_BLOCK_SIZE;
+
+					uint8_t responseWithBlock[size + RAW_MESSAGE_SIZE];
+					serialize((uint8_t*) &responseWithBlock, MAGIC_NUMBER, MSG_RESPONSE_OK, nBlock);
+					for (ssize_t k = 0; k < MAX_BLOCK_SIZE; k++)
+						responseWithBlock[k + RAW_MESSAGE_SIZE] = block.data[k];
+
+					log_printf(LOG_INFO, "			Sending prepared response...");
+					ssize_t s = send(fds[i].fd, &responseWithBlock, MAX_BLOCK_SIZE + RAW_MESSAGE_SIZE, 0);
+					if (s == -1) {
+						perror("			Message sending failed");
+						continue;
+					}
+					log_printf(LOG_INFO, "			...%i of %i bytes sent", size + RAW_MESSAGE_SIZE, size + RAW_MESSAGE_SIZE);
+					fds[i].events = POLLIN;
 				}
 			}
 		}
