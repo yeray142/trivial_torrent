@@ -282,109 +282,154 @@ int clientFunc(char *argv) {
 int serverFunc(char *port, char *metainfo_file) {
 	log_printf(LOG_INFO, "Executing server...");
 
+	// 1. Create the torrent from the metainfo_file:
 	struct torrent_t torrent;
 	if (torrent_creation(&torrent, metainfo_file) == -1)
 		return -1;
 
 	log_printf(LOG_INFO, "Total file size: %li", torrent.downloaded_file_size);
 
+	// 2. Get a listening socket:
 	int sock = listening_socket(port);
 	if (sock == -1)
 		return -1;
 
+	// 3. Initialisation of structures:
 	struct pollfd fds[MAX_CLIENTS_PER_SERVER + 1];
 	
-	nfds_t nfds = 0;
+	nfds_t nfds = 0;	// fds counter
 	fds[nfds].fd = sock;
 	fds[nfds].events = POLLIN;
 	nfds++;
 
+	for(nfds_t i = nfds; i <= MAX_CLIENTS_PER_SERVER; i++) {
+    	fds[i].fd = -1;		// File descriptor
+    	fds[i].events = 0;	// Events to monitor
+    	fds[i].revents = 0;	// Events in place
+    }
+
+	// 4. Polling loop:
 	while (1) {
-		// a) Polling (poll())
 		log_printf(LOG_INFO, "	polling...");
-		int x = poll(fds, nfds, -1);
-		if (x == -1) {
+
+		if (poll(fds, nfds, -1) == -1) { // Polling failed
 			perror(" Polling failed");
 			return -1;
 		}
-		else {
-			// b) Loop through fds[]
+		else {	// Polling succeed
 			log_printf(LOG_INFO, " 	...poll has returned with events...");
-			nfds_t n = nfds;
-			for (nfds_t i = 0; i < n; i++) {
-				if (fds[i].revents > 0) {
-					if (fds[i].fd == sock) {
-						log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, fds[i].revents);
-						log_printf(LOG_INFO, "		New connection incoming");
-						struct sockaddr clientAddr;
-						socklen_t size;
 
-						int s1 = accept(sock, &clientAddr, &size);
-						if (s1 == -1)
-							perror("			accept failed");
-						else {
-							log_printf(LOG_INFO, "			accept ok");
+			// Loop through all file descriptors in fds:
+			for (nfds_t i = 0; i < nfds; i++) {
+				if (fds[i].fd == -1)	// If the file descriptor is -1, skip it.
+					continue;
 
-							int option_value = 13;
-							if (setsockopt(s1, IPPROTO_TCP, SO_RCVLOWAT, &option_value, sizeof(option_value)) == -1)
-								perror("			setsockopt failed");
-							else
-								log_printf(LOG_INFO, "			setsockopt[SO_RCVLOWAT=13] successful");
+				if (fds[i].fd == sock && (fds[i].revents & POLLIN)) {	// File descriptor is the listening socket with POLLIN event.
+					// Accept a new incoming connection:
+					log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, fds[i].revents);
+					log_printf(LOG_INFO, "		New connection incoming");
 
-							if (fcntl(s1, F_SETFL, O_NONBLOCK) == -1)
-								perror("			fcntl failed");
-							else
-								log_printf(LOG_INFO, "			fcntl[O_NONBLOCK] successful");
+					struct sockaddr clientAddr;
+					socklen_t size = sizeof(clientAddr);
 
+					int s1 = accept(sock, &clientAddr, &size);
+					if (s1 == -1) {
+						perror("			accept failed");
+						continue;	// Skip this iteration.
+					}
+					else {
+						log_printf(LOG_INFO, "			accept ok");
+
+						int option_value = 13;
+						if (setsockopt(s1, IPPROTO_TCP, SO_RCVLOWAT, &option_value, sizeof(option_value)) == -1) { // Set sockopt to 13.
+							perror("			setsockopt failed");
+							close(s1);
+							continue;
+						}
+						else
+							log_printf(LOG_INFO, "			setsockopt[SO_RCVLOWAT=13] successful");
+
+						if (fcntl(s1, F_SETFL, O_NONBLOCK) == -1) {	// Set socket to non-blocking.
+							perror("			fcntl failed");
+							close(s1);
+							continue;
+						}
+						else
+							log_printf(LOG_INFO, "			fcntl[O_NONBLOCK] successful");
+
+						// Append socket to fds:
+						if (nfds <= MAX_CLIENTS_PER_SERVER) {
 							fds[nfds].fd = s1;
 							fds[nfds].events = POLLIN;
 							nfds++;
 						}
+						else
+							close(s1);
+						continue; // Skip iteration.
+					}
+				}
+				else if (fds[i].fd == sock)
+					continue;
+
+				// We can ensure it is an ordinary file descriptor:
+				log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, fds[i].revents);
+				if (fds[i].revents & POLLIN) { // Attend POLLIN events.
+					log_printf(LOG_INFO, "		POLLIN event");
+					uint8_t message[RAW_MESSAGE_SIZE];
+
+					if (recv(fds[i].fd, &message, sizeof(message), 0) == -1) { // Client has closed connection.
+						log_printf(LOG_INFO, "			client closed connection");
+
+						close(fds[i].fd);
+								
+						fds[i].fd = 0;
+						nfds--;
+						continue; // Skip iteration.
+					}
+					
+					// We can ensure there is a message:
+					log_printf(LOG_INFO, "			received message from client");
+
+					uint32_t magic; uint8_t code; uint64_t nBlock;
+					deserialize(&magic, &code, &nBlock, (const uint8_t*) &message);
+
+					log_printf(LOG_INFO, "			Request is { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", magic, nBlock, code);
+
+					if (torrent.block_map[nBlock] == 1) {
+						// Block available:
+						struct block_t block;
+						if (load_block(&torrent, nBlock, &block) == -1) {
+							perror("		Block storing failed...");
+							continue;
+						}
+
+						uint8_t responseWithBlock[MAX_BLOCK_SIZE + RAW_MESSAGE_SIZE];
+						serialize((uint8_t*) &responseWithBlock, MAGIC_NUMBER, MSG_RESPONSE_OK, nBlock);
+						for (ssize_t k = 0; k < MAX_BLOCK_SIZE; k++)
+							responseWithBlock[k + RAW_MESSAGE_SIZE] = block.data[k];
+
+						if (send(fds[i].fd, &responseWithBlock, sizeof(responseWithBlock), 0) == -1) {
+							perror("			Message sending failed");
+							continue;
+						}
+
+						log_printf(LOG_INFO, "			Response will be { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", MAGIC_NUMBER, nBlock, MSG_RESPONSE_OK);
+						log_printf(LOG_INFO, "			(we will handle this later; marking this fd for POLLOUT");
+						// fds[i].events |= POLLOUT;
 					}
 					else {
-						log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, fds[i].revents);
-						uint8_t message[RAW_MESSAGE_SIZE];
-						if (recv(fds[i].fd, &message, sizeof(message), 0) == -1) {
-							log_printf(LOG_INFO, "			client closed connection");
-							close(fds[i].fd);
-							
-							fds[i].fd = 0;
-							nfds--;
-						}
-						else {
-							log_printf(LOG_INFO, "			received message from client");
-							uint32_t magic; uint8_t code; uint64_t nBlock;
-							deserialize(&magic, &code, &nBlock, (const uint8_t*) &message);
-							log_printf(LOG_INFO, "			Request is { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", magic, nBlock, code);
+						// Block not available:
+						uint8_t response[RAW_MESSAGE_SIZE];
+						serialize((uint8_t*) &response, MAGIC_NUMBER, MSG_RESPONSE_NA, nBlock);
 
-							if (torrent.block_map[nBlock] == 1) {
-								// Block available:
-								struct block_t block;
-								if (load_block(&torrent, nBlock, &block) == -1)
-										perror("		Block storing failed...");
-
-								uint8_t responseWithBlock[MAX_BLOCK_SIZE + RAW_MESSAGE_SIZE];
-								serialize((uint8_t*) &responseWithBlock, MAGIC_NUMBER, MSG_RESPONSE_OK, nBlock);
-								for (ssize_t k = 0; k < MAX_BLOCK_SIZE; k++)
-									responseWithBlock[k + RAW_MESSAGE_SIZE] = block.data[k];
-
-								if (send(fds[i].fd, &responseWithBlock, sizeof(responseWithBlock), 0) == -1)
-									perror("			Message sending failed");
-								else
-									log_printf(LOG_INFO, "			Response has been { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", MAGIC_NUMBER, nBlock, MSG_RESPONSE_OK);
-							}
-							else {
-								// Block not available:
-								uint8_t response[RAW_MESSAGE_SIZE];
-								serialize((uint8_t*) &response, MAGIC_NUMBER, MSG_RESPONSE_NA, nBlock);
-
-								if (send(fds[i].fd, &response, sizeof(response), 0) == -1)
-									perror("			Message sending failed");
-								else
-									log_printf(LOG_INFO, "			Response has been { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", MAGIC_NUMBER, nBlock, MSG_RESPONSE_NA);
-							}
-						}
+						if (send(fds[i].fd, &response, sizeof(response), 0) == -1)
+							perror("			Message sending failed");
+						else
+							log_printf(LOG_INFO, "			Response has been { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", MAGIC_NUMBER, nBlock, MSG_RESPONSE_NA);
 					}
+				}
+				else if (fds[i].revents & POLLOUT) { // Attend POLLOUT events.
+					log_printf(LOG_INFO, "		POLLOUT event");
 				}
 			}
 		}
