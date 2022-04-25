@@ -32,10 +32,10 @@ enum { 	RAW_MESSAGE_SIZE = 13,
 		MAX_CLIENTS_PER_SERVER = 1024};
 
 // To get rid of some warnings
-int clientFunc(char *argv);
-int serverFunc(char *port, char *metainfo_file);
-void removeExtension(char* downloaded_name, const char* file_name);
-void serialize(uint8_t *buffer, const uint32_t magicNumber, const uint8_t code, const uint64_t bock_number);
+int client_func(char *argv);
+int server_func(char *port, char *metainfo_file);
+void remove_extension(char* downloaded_name, const char* file_name);
+void serialize(uint8_t *buffer, const uint32_t magic_number, const uint8_t code, const uint64_t bock_number);
 void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_number, const uint8_t *buffer);
 int torrent_creation(struct torrent_t *torrent, const char *metainfo_file);
 int listening_socket(const char *port);
@@ -47,7 +47,7 @@ int listening_socket(const char *port);
  * @param file_name is the file's name.
  * @return void.
  */
-void removeExtension(char* downloaded_name, const char* file_name) {
+void remove_extension(char* downloaded_name, const char* file_name) {
 	for (int i = 0; i < (int) strlen((const char *) file_name); i++) {
 		if (file_name[i] != '.')
 			downloaded_name[i] = file_name[i];
@@ -62,17 +62,15 @@ void removeExtension(char* downloaded_name, const char* file_name) {
 /**
  * Serializes all the message data into an uint8_t buffer.
  * @param buffer is the buffer where the data will be stored.
- * @param magicNumber is the MAGIC_NUBER constant.
+ * @param magic_number is the MAGIC_NUBER constant.
  * @param code is the message code: MSG_REQUEST...
  * @param block_number is the bock number.
  * @return void.
  */
-void serialize(uint8_t *buffer, const uint32_t magicNumber, const uint8_t code, const uint64_t block_number) {
-	// log_printf(LOG_INFO, "	Start of serialization...");
-
+void serialize(uint8_t *buffer, const uint32_t magic_number, const uint8_t code, const uint64_t block_number) {
 	// Serialize MAGIC NUMBER:
 	for (int i = 0; i < 4; i++)
-		buffer[i] = (uint8_t) ((magicNumber >> (32 - (i+1)*8)) & 0xff);
+		buffer[i] = (uint8_t) ((magic_number >> (32 - (i+1)*8)) & 0xff);
 
 	// Serialize message code:
 	buffer[4] = code;
@@ -80,8 +78,6 @@ void serialize(uint8_t *buffer, const uint32_t magicNumber, const uint8_t code, 
 	// Serialize block number:
 	for (int i = 5; i < 13; i++)
 		buffer[i] = (uint8_t) ((block_number >> (64 - (i-4)*8)) & 0xff);
-
-	// log_printf(LOG_INFO,"	...end of serialization");
 }
 
 
@@ -94,8 +90,6 @@ void serialize(uint8_t *buffer, const uint32_t magicNumber, const uint8_t code, 
  * @return void.
  */
 void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_number, const uint8_t *buffer) {
-	// log_printf(LOG_INFO, "	Start of deserialization...");
-
 	// Deserialize MAGIC NUMBER:
 	*magic_number = 0;
 	for (int i = 0; i < 4; i++) {
@@ -112,8 +106,6 @@ void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_
 		*block_number >>= 8;
 		*block_number |= (uint64_t) buffer[i+5];
 	}
-
-	// log_printf(LOG_INFO, "	...end of deserialization");
 }
 
 
@@ -124,13 +116,16 @@ void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_
  * @return -1 if there is an error or 0 if it was executed successfully.
  */
 int torrent_creation(struct torrent_t *torrent, const char *metainfo_file) {
+	// Removes the extension of the metainfo_file string:
 	char downloaded_name[strlen(metainfo_file)];
-	removeExtension((char *) &downloaded_name, metainfo_file);
+	remove_extension((char *) &downloaded_name, metainfo_file);
 
+	// Creates the torrent form the metainfo file:
 	if(create_torrent_from_metainfo_file((const char *) metainfo_file, (struct torrent_t *) torrent, (const char *) &downloaded_name) == -1) {
 		perror("Torrent creation from metainfo file failed");
 		return -1;
 	}
+
 	return 0;
 }
 
@@ -141,18 +136,21 @@ int torrent_creation(struct torrent_t *torrent, const char *metainfo_file) {
  * @return -1 if there is an error or the socket's file descriptor if it was executed successfully.
  */
 int listening_socket(const char *port) {
+	// Creates the socket:
 	int sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (sock == -1) {
 		perror("Socket creation failed");
 		return -1;
 	}
 
+	// Sets it to non-blocking:
 	if (fcntl(sock, F_SETFL, O_NONBLOCK) == -1) {
 		perror("Setting socket to non-blocking failed");
 		return -1;
 	}
 	log_printf(LOG_INFO, "	socket ok");
 
+	// Creates the sockaddr_in structure and binds it:
 	struct sockaddr_in servAddr;
 	servAddr.sin_family = AF_INET;
 	servAddr.sin_addr.s_addr = INADDR_ANY;
@@ -164,6 +162,7 @@ int listening_socket(const char *port) {
 	}
 	log_printf(LOG_INFO, "	bind ok");
 
+	// Configures the socket to be a listening socket:
 	if (listen(sock, 0) == -1) {
 		perror("Socket listening failed");
 		return -1;
@@ -177,24 +176,28 @@ int listening_socket(const char *port) {
 /**
  * Client function.
  */
-int clientFunc(char *argv) {
+int client_func(char *argv) {
 	log_printf(LOG_INFO, "Executing client...");
 
+	// Creates the torrent structure:
 	struct torrent_t torrent;
 	if (torrent_creation(&torrent, argv) == -1)
 		return -1;
 
 	log_printf(LOG_INFO, "Total file size: %li", torrent.downloaded_file_size);
 
+	// Loop through all the torrent peers:
 	int sock;
 	struct sockaddr_in servAddr;
 	for (uint64_t i = 0; i < torrent.peer_count; i++){
+		// Creates the socket:
 		sock = socket(AF_INET, SOCK_STREAM, 0);
 		if ( sock == -1 ){
 			perror("Socket creation failed");
 			return -1;
 		}
 
+		// Deserializes the IP address of the current peer:
 		struct peer_information_t peer = torrent.peers[i];
 		uint32_t ip = 0;
 		for (int y = 3; y >= 0; y--) {
@@ -210,12 +213,13 @@ int clientFunc(char *argv) {
 		if(connect(sock, (const struct sockaddr *) &servAddr, sizeof(servAddr)) == -1)
 			perror("... connection failed");
 		else {
+			// Loop through all the unavailable blocks:
 			for (uint64_t j = 0; j < torrent.block_count; j++){
 
 				uint8_t message[RAW_MESSAGE_SIZE];
 				serialize((uint8_t*) &message, MAGIC_NUMBER, MSG_REQUEST, j);
-
 				log_printf(LOG_INFO, "	Requesting block { magic_number = %08" PRIx32 ", block_number =  %li, message_code = %i}", MAGIC_NUMBER, j, MSG_REQUEST);
+
 				if (send(sock, &message, sizeof(message), 0) == -1)
 					perror("Message sending failed");
 				else {
@@ -279,7 +283,7 @@ int clientFunc(char *argv) {
 /**
  * Server function.
  */
-int serverFunc(char *port, char *metainfo_file) {
+int server_func(char *port, char *metainfo_file) {
 	log_printf(LOG_INFO, "Executing server...");
 
 	// 1. Create the torrent from the metainfo_file:
@@ -366,7 +370,7 @@ int serverFunc(char *port, char *metainfo_file) {
 						else
 							close(s1);		
 					}
-					continue; // Skip iteration.
+					continue;
 				}
 				else if (fds[i].fd == sock)
 					continue;
@@ -384,7 +388,7 @@ int serverFunc(char *port, char *metainfo_file) {
 								
 						fds[i].fd = 0;
 						nfds--;
-						continue; // Skip iteration.
+						continue;
 					}
 					
 					// We can ensure there is a message:
@@ -398,24 +402,6 @@ int serverFunc(char *port, char *metainfo_file) {
 					if (torrent.block_map[nBlock] == 1) {
 						// Block available:
 						polloutResponses[i - 1] = (int64_t) nBlock;
-						
-						/*
-						struct block_t block;
-						if (load_block(&torrent, nBlock, &block) == -1) {
-							perror("		Block storing failed...");
-							continue;
-						}
-
-						uint8_t responseWithBlock[MAX_BLOCK_SIZE + RAW_MESSAGE_SIZE];
-						serialize((uint8_t*) &responseWithBlock, MAGIC_NUMBER, MSG_RESPONSE_OK, nBlock);
-						for (ssize_t k = 0; k < MAX_BLOCK_SIZE; k++)
-							responseWithBlock[k + RAW_MESSAGE_SIZE] = block.data[k];
-
-						if (send(fds[i].fd, &responseWithBlock, sizeof(responseWithBlock), 0) == -1) {
-							perror("			Message sending failed");
-							continue;
-						}
-						*/
 
 						log_printf(LOG_INFO, "			Response will be { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", MAGIC_NUMBER, nBlock, MSG_RESPONSE_OK);
 						log_printf(LOG_INFO, "			(we will handle this later; marking this fd for POLLOUT");
@@ -491,9 +477,9 @@ int main(int argc, char **argv) {
 
 	// Check if client or server using argc and argv.
 	if (argv[1][0] == '-' && argv[1][1] == 'l')
-		serverFunc(argv[2], argv[3]);
+		server_func(argv[2], argv[3]);
 	else
-		clientFunc(argv[1]);
+		client_func(argv[1]);
 
 	// The following statements most certainly will need to be deleted at some point...
 	(void) argc;
