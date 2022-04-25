@@ -86,6 +86,8 @@ int handle_arguments(int argc, char** argv) {
  * @return void.
  */
 void remove_extension(char* downloaded_name, const char* file_name) {
+	assert(file_name != NULL);
+
 	for (int i = 0; i < (int) strlen((const char *) file_name); i++) {
 		if (file_name[i] != '.')
 			downloaded_name[i] = file_name[i];
@@ -106,14 +108,14 @@ void remove_extension(char* downloaded_name, const char* file_name) {
  * @return void.
  */
 void serialize(uint8_t *buffer, const uint32_t magic_number, const uint8_t code, const uint64_t block_number) {
-	// Serialize MAGIC NUMBER:
+	// Serializes MAGIC NUMBER:
 	for (int i = 0; i < 4; i++)
 		buffer[i] = (uint8_t) ((magic_number >> (32 - (i+1)*8)) & 0xff);
 
-	// Serialize message code:
+	// Serializes message code:
 	buffer[4] = code;
 
-	// Serialize block number:
+	// Serializes block number:
 	for (int i = 5; i < 13; i++)
 		buffer[i] = (uint8_t) ((block_number >> (64 - (i-4)*8)) & 0xff);
 }
@@ -128,17 +130,19 @@ void serialize(uint8_t *buffer, const uint32_t magic_number, const uint8_t code,
  * @return void.
  */
 void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_number, const uint8_t *buffer) {
-	// Deserialize MAGIC NUMBER:
+	assert(buffer != NULL);
+
+	// Deserializes MAGIC NUMBER:
 	*magic_number = 0;
 	for (int i = 0; i < 4; i++) {
 		*magic_number <<= 8;
 		*magic_number |= (uint32_t) buffer[i];
 	}
 
-	// Deserialize message code:
+	// Deserializes message code:
 	*message_code = buffer[4];
 
-	// Deserialize block number:
+	// Deserializes block number:
 	*block_number = 0;
 	for (int i = 0; i < 8; i++) {
 		*block_number >>= 8;
@@ -154,12 +158,14 @@ void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_
  * @return -1 if there is an error or 0 if it was executed successfully.
  */
 int torrent_creation(struct torrent_t *torrent, const char *metainfo_file) {
+	assert(metainfo_file != NULL);
+
 	// Removes the extension of the metainfo_file string:
 	char downloaded_name[strlen(metainfo_file)];
 	remove_extension((char *) &downloaded_name, metainfo_file);
 
 	// Creates the torrent form the metainfo file:
-	if(create_torrent_from_metainfo_file((const char *) metainfo_file, (struct torrent_t *) torrent, (const char *) &downloaded_name) == -1) {
+	if(create_torrent_from_metainfo_file(metainfo_file, torrent, (const char *) &downloaded_name) == -1) {
 		perror("Torrent creation from metainfo file failed");
 		return -1;
 	}
@@ -174,6 +180,8 @@ int torrent_creation(struct torrent_t *torrent, const char *metainfo_file) {
  * @return -1 if there is an error or the socket's file descriptor if it was executed successfully.
  */
 int listening_socket(const char *port) {
+	assert(port != NULL);
+
 	// Creates the socket:
 	int sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (sock == -1) {
@@ -192,7 +200,7 @@ int listening_socket(const char *port) {
 	struct sockaddr_in servAddr;
 	servAddr.sin_family = AF_INET;
 	servAddr.sin_addr.s_addr = INADDR_ANY;
-	servAddr.sin_port = htons((uint16_t)strtol(port, NULL, 10));
+	servAddr.sin_port = htons((uint16_t) atoi(port));
 
 	if (bind(sock, (const struct sockaddr *) &servAddr, sizeof(servAddr)) == -1) {
 		perror("Socket bound failed");
@@ -212,27 +220,27 @@ int listening_socket(const char *port) {
 
 
 /**
- * Client function.
+ * Clientside function.
+ * @param metainfo_file is the metainfo_file name's string.
+ * @return -1 if something goes wrong or 0 if it was successfully executed.
  */
-int client_func(char *argv) {
+int client_func(char *metainfo_file) {
+	assert(metainfo_file != NULL);
 	log_printf(LOG_INFO, "Executing client...");
 
 	// Creates the torrent structure:
 	struct torrent_t torrent;
-	if (torrent_creation(&torrent, argv) == -1)
+	if (torrent_creation(&torrent, metainfo_file) == -1)
 		return -1;
-
 	log_printf(LOG_INFO, "Total file size: %li", torrent.downloaded_file_size);
 
 	// Loop through all the torrent peers:
-	int sock;
-	struct sockaddr_in servAddr;
 	for (uint64_t i = 0; i < torrent.peer_count; i++){
 		// Creates the socket:
-		sock = socket(AF_INET, SOCK_STREAM, 0);
+		int sock = socket(AF_INET, SOCK_STREAM, 0);
 		if ( sock == -1 ){
 			perror("Socket creation failed");
-			return -1;
+			continue;
 		}
 
 		// Deserializes the IP address of the current peer:
@@ -243,99 +251,116 @@ int client_func(char *argv) {
 			ip |= (uint32_t) peer.peer_address[y];
 		}
 
+		struct sockaddr_in servAddr;
 		servAddr.sin_family = AF_INET;
 		servAddr.sin_addr.s_addr = ip;
 		servAddr.sin_port = peer.peer_port;
 
 		log_printf(LOG_INFO, "Connecting to peer #%li... ", i);
-		if(connect(sock, (const struct sockaddr *) &servAddr, sizeof(servAddr)) == -1)
+		if(connect(sock, (const struct sockaddr *) &servAddr, sizeof(servAddr)) == -1) {
 			perror("... connection failed");
-		else {
-			// Loop through all the unavailable blocks:
-			for (uint64_t j = 0; j < torrent.block_count; j++){
+			close(sock);
+			continue;
+		}
+		
+		// Loop through all the unavailable blocks:
+		for (uint64_t j = 0; j < torrent.block_count; j++) {
+			if (torrent.block_map[j] == 1)
+				continue;
 
-				uint8_t message[RAW_MESSAGE_SIZE];
-				serialize((uint8_t*) &message, MAGIC_NUMBER, MSG_REQUEST, j);
-				log_printf(LOG_INFO, "	Requesting block { magic_number = %08" PRIx32 ", block_number =  %li, message_code = %i}", MAGIC_NUMBER, j, MSG_REQUEST);
+			// Sends the request of the current block:
+			uint8_t message[RAW_MESSAGE_SIZE];
+			serialize((uint8_t*) &message, MAGIC_NUMBER, MSG_REQUEST, j);
+			log_printf(LOG_INFO, "	Requesting block { magic_number = %08" PRIx32 ", block_number =  %li, message_code = %i}", MAGIC_NUMBER, j, MSG_REQUEST);
 
-				if (send(sock, &message, sizeof(message), 0) == -1)
-					perror("Message sending failed");
-				else {
-					log_printf(LOG_INFO, "	Sent message size: %li", sizeof(message));
-
-					log_printf(LOG_INFO, "	Waiting for response...");
-					uint8_t response[RAW_MESSAGE_SIZE];
-					ssize_t n = recv(sock, &response, sizeof(response), 0);
-					if(n == -1)
-						perror("Message reception failed");
-					else {
-						log_printf(LOG_INFO, "	Message received...");
-						log_printf(LOG_INFO, "	Received message size: %li", n);
-
-						uint32_t magic; uint8_t code; uint64_t nBlock;
-						deserialize(&magic, &code, &nBlock, (const uint8_t*) &response);
-
-						log_printf(LOG_INFO, "	Received message { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", magic, nBlock, code);
-						if (magic == MAGIC_NUMBER && code == MSG_RESPONSE_OK) {
-							log_printf(LOG_INFO, "		Block available...");
-
-							size_t size = MAX_BLOCK_SIZE;
-							if (j == (torrent.block_count -1 ))
-								size = torrent.downloaded_file_size - (torrent.block_count - 1)*MAX_BLOCK_SIZE;
-							uint8_t response_block[size];
-							ssize_t n_block = recv(sock, &response_block, sizeof(response_block), MSG_WAITALL);
-							if (n_block == -1)
-								perror("Block reception failed");
-							else {
-								// If the server responds with the block, store it to the downloaded file.
-								struct block_t  block;
-								for (ssize_t k = 0; k < n_block; k++)
-									block.data[k] = response_block[k];
-
-								block.size = (size_t) n_block;
-								log_printf(LOG_INFO, "		Block data: { block.size = %li; block.data[0] = %i }", block.size, block.data[0]);
-								if (store_block(&torrent, j, &block) == -1)
-									perror("	Block storing failed...");
-							}
-						}
-						else
-							log_printf(LOG_INFO, "		Block not available...");
-
-					}
-				}
+			if (send(sock, &message, sizeof(message), 0) == -1) {
+				perror("Message sending failed");
+				break;
 			}
+			log_printf(LOG_INFO, "	Sent message size: %li", sizeof(message));
+
+			// Waits for the server's response:
+			log_printf(LOG_INFO, "	Waiting for response...");
+			uint8_t response[RAW_MESSAGE_SIZE];
+			ssize_t n = recv(sock, &response, sizeof(response), MSG_WAITALL);
+			if (n == -1) {
+				perror("Message reception failed");
+				break;
+			}
+			log_printf(LOG_INFO, "	Message received...");
+			log_printf(LOG_INFO, "	Received message size: %li", n);
+
+			// Reads the received message:
+			uint32_t magic; uint8_t code; uint64_t n_block;
+			deserialize(&magic, &code, &n_block, (const uint8_t*) &response);
+
+			log_printf(LOG_INFO, "	Received message { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", magic, n_block, code);
+			if (magic == MAGIC_NUMBER && code == MSG_RESPONSE_OK) {
+				// Receives the block from the server:
+				log_printf(LOG_INFO, "		Block available...");
+
+				size_t size = MAX_BLOCK_SIZE;
+				if (j == (torrent.block_count -1))
+					size = torrent.downloaded_file_size - (torrent.block_count - 1)*MAX_BLOCK_SIZE;
+
+				uint8_t response_block[size];
+				ssize_t size_block = recv(sock, &response_block, sizeof(response_block), MSG_WAITALL);
+				if (size_block == -1) {
+					perror("Block reception failed");
+					break;
+				}
+		
+				// If the server responds with the block, stores it to the downloaded file:
+				struct block_t  block;
+				for (ssize_t k = 0; k < size_block; k++)
+					block.data[k] = response_block[k];
+
+				block.size = (size_t) size_block;
+				log_printf(LOG_INFO, "		Block data: { block.size = %li; block.data[0] = %i }", block.size, block.data[0]);
+				if (store_block(&torrent, j, &block) == -1) {
+					perror("	Block storing failed...");
+					continue;
+				}
+
+				torrent.block_map[j] = 1;
+				continue;
+			}
+			log_printf(LOG_INFO, "		Block not available...");
 		}
 
-		if(close(sock) == -1) {
+		if (close(sock) == -1) {
 			perror("Socket closing failed");
 			return -1;
 		}
 	}
 	log_printf(LOG_INFO, "Ending clientside...");
-
 	return 0;
 }
 
 
 /**
- * Server function.
+ * Serverside function.
+ * @param port is the port where the server has to listen to.
+ * @param metainfo_file is the metainfo_file name's string.
+ * @return -1 if something goes wrong.
  */
 int server_func(char *port, char *metainfo_file) {
+	assert(metainfo_file != NULL && port != NULL);
 	log_printf(LOG_INFO, "Executing server...");
 
-	// 1. Create the torrent from the metainfo_file:
+	// 1. Creates the torrent from the metainfo_file:
 	struct torrent_t torrent;
 	if (torrent_creation(&torrent, metainfo_file) == -1)
 		return -1;
 
 	log_printf(LOG_INFO, "Total file size: %li", torrent.downloaded_file_size);
 
-	// 2. Get a listening socket:
+	// 2. Gets the listening socket:
 	int sock = listening_socket(port);
 	if (sock == -1)
 		return -1;
 
-	// 3. Initialisation of structures:
+	// 3. Initialisates the structures:
 	struct pollfd fds[MAX_CLIENTS_PER_SERVER + 1];
 	
 	nfds_t nfds = 0;	// fds counter
@@ -343,10 +368,10 @@ int server_func(char *port, char *metainfo_file) {
 	fds[nfds].events = POLLIN;
 	nfds++;
 
-	for(nfds_t i = nfds; i <= MAX_CLIENTS_PER_SERVER; i++) {
-    	fds[i].fd = -1;		// File descriptor
-    	fds[i].events = 0;	// Events to monitor
-    	fds[i].revents = 0;	// Events in place
+	for (nfds_t i = nfds; i <= MAX_CLIENTS_PER_SERVER; i++) {
+    	fds[i].fd = -1;
+    	fds[i].events = 0;
+    	fds[i].revents = 0;	
     }
 
 	int64_t polloutResponses[MAX_CLIENTS_PER_SERVER] = {-1}; // Block numbers to handle for each client.
@@ -354,143 +379,142 @@ int server_func(char *port, char *metainfo_file) {
 	// 4. Polling loop:
 	while (1) {
 		log_printf(LOG_INFO, "	polling...");
-
-		if (poll(fds, nfds, -1) == -1) { // Polling failed
+		if (poll(fds, nfds, -1) == -1) {
 			perror(" Polling failed");
 			return -1;
 		}
-		else {	// Polling succeed
-			log_printf(LOG_INFO, " 	...poll has returned with events...");
+		log_printf(LOG_INFO, " 	...poll has returned with events...");
 
-			// Loop through all file descriptors in fds:
-			for (nfds_t i = 0; i < nfds; i++) {
-				if (fds[i].fd == -1)	// If the file descriptor is -1, skip it.
-					continue;
+		// Loop through all file descriptors in fds:
+		for (nfds_t i = 0; i < nfds; i++) {
+			if (fds[i].fd == -1)
+				continue;
 
-				if (fds[i].fd == sock && (fds[i].revents & POLLIN)) {	// File descriptor is the listening socket with POLLIN event.
-					// Accept a new incoming connection:
-					log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, fds[i].revents);
-					log_printf(LOG_INFO, "		New connection incoming");
+			if (fds[i].fd == sock && (fds[i].revents & POLLIN)) {	// File descriptor is the listening socket with POLLIN event.
+				// Accept a new incoming connection:
+				log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, fds[i].revents);
+				log_printf(LOG_INFO, "		New connection incoming");
 
-					struct sockaddr clientAddr;
-					socklen_t size = sizeof(clientAddr);
+				struct sockaddr clientAddr;
+				socklen_t size = sizeof(clientAddr);
 
-					int s1 = accept(sock, &clientAddr, &size);
-					if (s1 == -1)
-						perror("			accept failed");
-					else {
-						log_printf(LOG_INFO, "			accept ok");
-
-						int option_value = 13;
-						if (setsockopt(s1, IPPROTO_TCP, SO_RCVLOWAT, &option_value, sizeof(option_value)) == -1) { // Set sockopt to 13.
-							perror("			setsockopt failed");
-							close(s1);
-							continue;
-						}
-						else
-							log_printf(LOG_INFO, "			setsockopt[SO_RCVLOWAT=13] successful");
-
-						if (fcntl(s1, F_SETFL, O_NONBLOCK) == -1) {	// Set socket to non-blocking.
-							perror("			fcntl failed");
-							close(s1);
-							continue;
-						}
-						else
-							log_printf(LOG_INFO, "			fcntl[O_NONBLOCK] successful");
-
-						// Append socket to fds:
-						if (nfds <= MAX_CLIENTS_PER_SERVER) {
-							fds[nfds].fd = s1;
-							fds[nfds].events = POLLIN;
-							nfds++;
-						}
-						else
-							close(s1);		
-					}
+				int s1 = accept(sock, &clientAddr, &size);
+				if (s1 == -1) {
+					perror("			accept failed");
 					continue;
 				}
-				else if (fds[i].fd == sock)
+				
+				log_printf(LOG_INFO, "			accept ok");
+
+				int option_value = 13;
+				if (setsockopt(s1, IPPROTO_TCP, SO_RCVLOWAT, &option_value, sizeof(option_value)) == -1) { // Set sockopt to 13.
+					perror("			setsockopt failed");
+					close(s1);
 					continue;
+				}
+				else
+					log_printf(LOG_INFO, "			setsockopt[SO_RCVLOWAT=13] successful");
 
-				// We can ensure it is an ordinary file descriptor:
-				if (fds[i].revents & POLLIN) { // Attend POLLIN events.
-					log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, POLLIN);
-					log_printf(LOG_INFO, "		POLLIN event");
-					uint8_t message[RAW_MESSAGE_SIZE];
+				if (fcntl(s1, F_SETFL, O_NONBLOCK) == -1) {	// Set socket to non-blocking.
+					perror("			fcntl failed");
+					close(s1);
+					continue;
+				}
+				else
+					log_printf(LOG_INFO, "			fcntl[O_NONBLOCK] successful");
 
-					if (recv(fds[i].fd, &message, sizeof(message), 0) == -1) { // Client has closed connection.
-						log_printf(LOG_INFO, "			client closed connection");
+				// Append socket to fds:
+				if (nfds == MAX_CLIENTS_PER_SERVER + 1) {
+					log_printf(LOG_INFO, "			Error: The server reached its maximum number of connected clients.");
+					close(s1);
+					continue;
+				}
 
-						close(fds[i].fd);
+				fds[nfds].fd = s1;
+				fds[nfds].events = POLLIN;
+				nfds++;
+			}
+			
+			if (fds[i].fd == sock)
+				continue;
+
+			// We can ensure it is an ordinary file descriptor:
+			if (fds[i].revents & POLLIN) { // Attend POLLIN events.
+				log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, POLLIN);
+				log_printf(LOG_INFO, "		POLLIN event");
+				uint8_t message[RAW_MESSAGE_SIZE];
+
+				if (recv(fds[i].fd, &message, sizeof(message), 0) == -1) { // Client has closed connection.
+					log_printf(LOG_INFO, "			client closed connection");
+
+					close(fds[i].fd);
 								
-						fds[i].fd = 0;
-						nfds--;
-						continue;
-					}
-					
-					// We can ensure there is a message:
-					log_printf(LOG_INFO, "			received message from client");
-
-					uint32_t magic; uint8_t code; uint64_t nBlock;
-					deserialize(&magic, &code, &nBlock, (const uint8_t*) &message);
-
-					log_printf(LOG_INFO, "			Request is { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", magic, nBlock, code);
-
-					if (torrent.block_map[nBlock] == 1) {
-						// Block available:
-						polloutResponses[i - 1] = (int64_t) nBlock;
-
-						log_printf(LOG_INFO, "			Response will be { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", MAGIC_NUMBER, nBlock, MSG_RESPONSE_OK);
-						log_printf(LOG_INFO, "			(we will handle this later; marking this fd for POLLOUT");
-						fds[i].events = POLLOUT;
-					}
-					else {
-						// Block not available:
-						uint8_t response[RAW_MESSAGE_SIZE];
-						serialize((uint8_t*) &response, MAGIC_NUMBER, MSG_RESPONSE_NA, nBlock);
-
-						if (send(fds[i].fd, &response, sizeof(response), 0) == -1)
-							perror("			Message sending failed");
-						else
-							log_printf(LOG_INFO, "			Response has been { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", MAGIC_NUMBER, nBlock, MSG_RESPONSE_NA);
-					}
+					fds[i].fd = 0;
+					nfds--;
+					continue;
 				}
-				else if (fds[i].revents & POLLOUT) { // Attend POLLOUT events.
-					log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, POLLOUT);
-					log_printf(LOG_INFO, "		POLLOUT event");
 					
-					uint64_t nBlock = (uint64_t) polloutResponses[i-1];
-					polloutResponses[i-1] = -1;
+				// We can ensure there is a message:
+				log_printf(LOG_INFO, "			received message from client");
 
-					struct block_t block;
-					if (load_block(&torrent, nBlock, &block) == -1) {
-						perror("		Block storing failed...");
-						continue;
-					}
+				uint32_t magic; uint8_t code; uint64_t n_block;
+				deserialize(&magic, &code, &n_block, (const uint8_t*) &message);
 
-					size_t size = MAX_BLOCK_SIZE;
-					if (nBlock == (torrent.block_count - 1))
-						size = torrent.downloaded_file_size - (torrent.block_count - 1)*MAX_BLOCK_SIZE;
+				log_printf(LOG_INFO, "			Request is { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", magic, n_block, code);
 
-					uint8_t responseWithBlock[size + RAW_MESSAGE_SIZE];
-					serialize((uint8_t*) &responseWithBlock, MAGIC_NUMBER, MSG_RESPONSE_OK, nBlock);
-					for (ssize_t k = 0; k < MAX_BLOCK_SIZE; k++)
-						responseWithBlock[k + RAW_MESSAGE_SIZE] = block.data[k];
+				if (torrent.block_map[n_block] == 1) {
+					// Block available:
+					polloutResponses[i - 1] = (int64_t) n_block;
 
-					log_printf(LOG_INFO, "			Sending prepared response...");
-					ssize_t s = send(fds[i].fd, &responseWithBlock, MAX_BLOCK_SIZE + RAW_MESSAGE_SIZE, 0);
-					if (s == -1) {
-						perror("			Message sending failed");
-						continue;
-					}
-					log_printf(LOG_INFO, "			...%i of %i bytes sent", size + RAW_MESSAGE_SIZE, size + RAW_MESSAGE_SIZE);
-					fds[i].events = POLLIN;
+					log_printf(LOG_INFO, "			Response will be { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", MAGIC_NUMBER, n_block, MSG_RESPONSE_OK);
+					log_printf(LOG_INFO, "			(we will handle this later; marking this fd for POLLOUT");
+					fds[i].events = POLLOUT;
+					continue;
 				}
+
+				// Block not available:
+				uint8_t response[RAW_MESSAGE_SIZE];
+				serialize((uint8_t*) &response, MAGIC_NUMBER, MSG_RESPONSE_NA, n_block);
+
+				if (send(fds[i].fd, &response, sizeof(response), 0) == -1)
+					perror("			Message sending failed");
+				else
+					log_printf(LOG_INFO, "			Response has been { magic_number = %08" PRIx32 ", block_number = %li, message_code = %i}", MAGIC_NUMBER, n_block, MSG_RESPONSE_NA);
+			}
+			else if (fds[i].revents & POLLOUT) { // Attend POLLOUT events.
+				log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, POLLOUT);
+				log_printf(LOG_INFO, "		POLLOUT event");
+					
+				uint64_t n_block = (uint64_t) polloutResponses[i-1];
+				polloutResponses[i-1] = -1;
+
+				struct block_t block;
+				if (load_block(&torrent, n_block, &block) == -1) {
+					perror("		Block storing failed...");
+					continue;
+				}
+
+				size_t size = MAX_BLOCK_SIZE;
+				if (n_block == (torrent.block_count - 1))
+					size = torrent.downloaded_file_size - (torrent.block_count - 1)*MAX_BLOCK_SIZE;
+
+				uint8_t responseWithBlock[size + RAW_MESSAGE_SIZE];
+				serialize((uint8_t*) &responseWithBlock, MAGIC_NUMBER, MSG_RESPONSE_OK, n_block);
+				for (ssize_t k = 0; k < MAX_BLOCK_SIZE; k++)
+					responseWithBlock[k + RAW_MESSAGE_SIZE] = block.data[k];
+
+				log_printf(LOG_INFO, "			Sending prepared response...");
+				ssize_t s = send(fds[i].fd, &responseWithBlock, MAX_BLOCK_SIZE + RAW_MESSAGE_SIZE, 0);
+				if (s == -1) {
+					perror("			Message sending failed");
+					continue;
+				}
+				log_printf(LOG_INFO, "			...%i of %i bytes sent", size + RAW_MESSAGE_SIZE, size + RAW_MESSAGE_SIZE);
+				fds[i].events = POLLIN;
 			}
 		}
 	}
 	log_printf(LOG_INFO, "Ending serverside...");
-
 	return 0;
 }
 
