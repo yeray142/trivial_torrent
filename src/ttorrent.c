@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <assert.h>
 
 // TODO: hey!? what is this?
 
@@ -28,17 +29,54 @@ static const uint8_t MSG_REQUEST = 0;
 static const uint8_t MSG_RESPONSE_OK = 1;
 static const uint8_t MSG_RESPONSE_NA = 2;
 
-enum { 	RAW_MESSAGE_SIZE = 13,
-		MAX_CLIENTS_PER_SERVER = 1024};
+enum {RAW_MESSAGE_SIZE = 13, MAX_CLIENTS_PER_SERVER = 1024};
+enum {SERVER_MODE = 1, CLIENT_MODE = 2};
 
 // To get rid of some warnings
 int client_func(char *argv);
 int server_func(char *port, char *metainfo_file);
+int handle_arguments(int argc, char** argv);
 void remove_extension(char* downloaded_name, const char* file_name);
 void serialize(uint8_t *buffer, const uint32_t magic_number, const uint8_t code, const uint64_t bock_number);
 void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_number, const uint8_t *buffer);
 int torrent_creation(struct torrent_t *torrent, const char *metainfo_file);
 int listening_socket(const char *port);
+
+
+/**
+ * Checks if the user-provided arguments are correct and returns if it's the server or the client.
+ * @param argc is the argc parameter of the main function.
+ * @param argv is the argv parameter of the main function.
+ * @return -1 if there is an error, or whether it's the server or client if it was executed successfully.
+ */
+int handle_arguments(int argc, char** argv) {
+	// Checks the number of arguments:
+	if (argc != 2 && argc != 4) {
+		log_printf(LOG_INFO, "Invalid argument: Expected 1 argument for client or 3 argument for server. Number of arguments received: %i", argc - 1);
+		return -1;
+	}
+
+	// Checks the arguments themselves:
+	if (argc == 4) {
+		if (argv[1][0] != '-' || argv[1][1] != 'l') {
+			log_printf(LOG_INFO, "Invalid argument: Expected '-l' as the first argument and received: %s", argv[1]);
+			return -1;
+		}
+		else if (atoi(argv[2]) <= 0) {
+			log_printf(LOG_INFO, "Invalid argument: Expected a valid PORT as the second parameter and received: %s", argv[2]);
+			return -1;
+		}
+		return SERVER_MODE;
+	}
+	
+	// At this point, we can ensure it has to be the client:
+	if (atoi(argv[1]) != 0) {
+		log_printf(LOG_INFO, "Invalid argument: Expected a torrent file and received a number: %s", argv[1]);
+		return -1;
+	}
+	
+	return CLIENT_MODE;
+}
 
 
 /**
@@ -273,7 +311,6 @@ int client_func(char *argv) {
 			return -1;
 		}
 	}
-
 	log_printf(LOG_INFO, "Ending clientside...");
 
 	return 0;
@@ -452,9 +489,7 @@ int server_func(char *port, char *metainfo_file) {
 			}
 		}
 	}
-
-	(void) metainfo_file;
-	(void) port;
+	log_printf(LOG_INFO, "Ending serverside...");
 
 	return 0;
 }
@@ -467,7 +502,6 @@ int main(int argc, char **argv) {
 
 	set_log_level(LOG_DEBUG);
 	log_printf(LOG_INFO, "Trivial Torrent (build %s %s) by %s", __DATE__, __TIME__, "Y. CORDERO and A. VARGAS");
-	//printf("File name: %s", argv[1]);
 
 	// ==========================================================================
 	// Parse command line
@@ -475,18 +509,16 @@ int main(int argc, char **argv) {
 
 	// TODO: some magical lines of code here that call other functions and do various stuff.
 
-	// Check if client or server using argc and argv.
-	if (argv[1][0] == '-' && argv[1][1] == 'l')
+	// Handle arguments:
+	int execution_mode = handle_arguments(argc, argv);
+	if (execution_mode == -1)
+		return 1;
+
+	// We can ensure arguments are OK:
+	if (execution_mode == SERVER_MODE)
 		server_func(argv[2], argv[3]);
 	else
 		client_func(argv[1]);
-
-	// The following statements most certainly will need to be deleted at some point...
-	(void) argc;
-	(void) MAGIC_NUMBER;
-	(void) MSG_REQUEST;
-	(void) MSG_RESPONSE_NA;
-	(void) MSG_RESPONSE_OK;
 
 	return 0;
 }
