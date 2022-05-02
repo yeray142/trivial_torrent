@@ -386,7 +386,7 @@ int server_func(char *port, char *metainfo_file) {
 		log_printf(LOG_INFO, " 	...poll has returned with events...");
 
 		// Loop through all file descriptors in fds:
-		for (nfds_t i = 0; i < nfds; i++) {
+		for (nfds_t i = 0; i <= MAX_CLIENTS_PER_SERVER; i++) {
 			if (fds[i].fd == -1)
 				continue;
 
