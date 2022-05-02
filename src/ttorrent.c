@@ -33,14 +33,15 @@ enum {RAW_MESSAGE_SIZE = 13, MAX_CLIENTS_PER_SERVER = 1024};
 enum {SERVER_MODE = 1, CLIENT_MODE = 2};
 
 // To get rid of some warnings
-int client_func(char *argv);
-int server_func(char *port, char *metainfo_file);
+int client_func(char* argv);
+int server_func(char* port, char* metainfo_file);
 int handle_arguments(int argc, char** argv);
 void remove_extension(char* downloaded_name, const char* file_name);
-void serialize(uint8_t *buffer, const uint32_t magic_number, const uint8_t code, const uint64_t bock_number);
-void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_number, const uint8_t *buffer);
-int torrent_creation(struct torrent_t *torrent, const char *metainfo_file);
-int listening_socket(const char *port);
+void serialize(uint8_t* buffer, const uint32_t magic_number, const uint8_t code, const uint64_t bock_number);
+void deserialize(uint32_t* magic_number, uint8_t* message_code, uint64_t* block_number, const uint8_t* buffer);
+int torrent_creation(struct torrent_t* torrent, const char* metainfo_file);
+int listening_socket(const char* port);
+int append_fd(struct pollfd* fds, int fd, short events);
 
 
 /**
@@ -107,7 +108,7 @@ void remove_extension(char* downloaded_name, const char* file_name) {
  * @param block_number is the bock number.
  * @return void.
  */
-void serialize(uint8_t *buffer, const uint32_t magic_number, const uint8_t code, const uint64_t block_number) {
+void serialize(uint8_t* buffer, const uint32_t magic_number, const uint8_t code, const uint64_t block_number) {
 	// Serializes MAGIC NUMBER:
 	for (int i = 0; i < 4; i++)
 		buffer[i] = (uint8_t) ((magic_number >> (32 - (i+1)*8)) & 0xff);
@@ -129,7 +130,7 @@ void serialize(uint8_t *buffer, const uint32_t magic_number, const uint8_t code,
  * @param buffer is the buffer where all the data is stored.
  * @return void.
  */
-void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_number, const uint8_t *buffer) {
+void deserialize(uint32_t* magic_number, uint8_t* message_code, uint64_t* block_number, const uint8_t* buffer) {
 	assert(buffer != NULL);
 
 	// Deserializes MAGIC NUMBER:
@@ -157,7 +158,7 @@ void deserialize(uint32_t *magic_number, uint8_t *message_code, uint64_t *block_
  * @param metainfo_file is the metainfo_file's name string.
  * @return -1 if there is an error or 0 if it was executed successfully.
  */
-int torrent_creation(struct torrent_t *torrent, const char *metainfo_file) {
+int torrent_creation(struct torrent_t* torrent, const char* metainfo_file) {
 	assert(metainfo_file != NULL);
 
 	// Removes the extension of the metainfo_file string:
@@ -179,7 +180,7 @@ int torrent_creation(struct torrent_t *torrent, const char *metainfo_file) {
  * @param port is the connection port that the socket has to be bound to.
  * @return -1 if there is an error or the socket's file descriptor if it was executed successfully.
  */
-int listening_socket(const char *port) {
+int listening_socket(const char* port) {
 	assert(port != NULL);
 
 	// Creates the socket:
@@ -220,11 +221,36 @@ int listening_socket(const char *port) {
 
 
 /**
+ * Appends a new fd to the fds structure.
+ * @param fds is the pollfd structure.
+ * @param fd is the fd to be added.
+ * @param events are the events of the fd that will be added.
+ * @return -1 if something goes wrong or 0 if it was added successfully.
+ */
+int append_fd(struct pollfd* fds, int fd, short events) {
+	// Loop through all the fds until an empty index is found:
+	int added = 0;
+	for (int i = 0; i <= MAX_CLIENTS_PER_SERVER; i++) {
+		if (fds[i].fd == -1) {
+			fds[i].fd = fd;
+			fds[i].events = events;
+			added = 1;
+			break;
+		}
+	}
+
+	if (added == 0)
+		return -1;
+	return 0;
+}
+
+
+/**
  * Clientside function.
  * @param metainfo_file is the metainfo_file name's string.
  * @return -1 if something goes wrong or 0 if it was successfully executed.
  */
-int client_func(char *metainfo_file) {
+int client_func(char* metainfo_file) {
 	assert(metainfo_file != NULL);
 	log_printf(LOG_INFO, "Executing client...");
 
@@ -259,7 +285,8 @@ int client_func(char *metainfo_file) {
 		log_printf(LOG_INFO, "Connecting to peer #%li... ", i);
 		if(connect(sock, (const struct sockaddr *) &servAddr, sizeof(servAddr)) == -1) {
 			perror("... connection failed");
-			close(sock);
+			if (close(sock) == -1)
+				perror("Closing socket failed");
 			continue;
 		}
 		
@@ -344,7 +371,7 @@ int client_func(char *metainfo_file) {
  * @param metainfo_file is the metainfo_file name's string.
  * @return -1 if something goes wrong.
  */
-int server_func(char *port, char *metainfo_file) {
+int server_func(char* port, char* metainfo_file) {
 	assert(metainfo_file != NULL && port != NULL);
 	log_printf(LOG_INFO, "Executing server...");
 
@@ -363,12 +390,11 @@ int server_func(char *port, char *metainfo_file) {
 	// 3. Initialisates the structures:
 	struct pollfd fds[MAX_CLIENTS_PER_SERVER + 1];
 	
-	nfds_t nfds = 0;	// fds counter
-	fds[nfds].fd = sock;
-	fds[nfds].events = POLLIN;
-	nfds++;
+	nfds_t nfds = 0;
+	fds[0].fd = sock;
+	fds[0].events = POLLIN;
 
-	for (nfds_t i = nfds; i <= MAX_CLIENTS_PER_SERVER; i++) {
+	for (nfds_t i = 1; i <= MAX_CLIENTS_PER_SERVER; i++) {
     	fds[i].fd = -1;
     	fds[i].events = 0;
     	fds[i].revents = 0;	
@@ -379,14 +405,14 @@ int server_func(char *port, char *metainfo_file) {
 	// 4. Polling loop:
 	while (1) {
 		log_printf(LOG_INFO, "	polling...");
-		if (poll(fds, nfds, -1) == -1) {
+		if (poll(fds, nfds + 1, -1) == -1) {
 			perror(" Polling failed");
 			return -1;
 		}
 		log_printf(LOG_INFO, " 	...poll has returned with events...");
 
 		// Loop through all file descriptors in fds:
-		for (nfds_t i = 0; i < nfds; i++) {
+		for (nfds_t i = 0; i <= MAX_CLIENTS_PER_SERVER; i++) {
 			if (fds[i].fd == -1)
 				continue;
 
@@ -409,7 +435,8 @@ int server_func(char *port, char *metainfo_file) {
 				int option_value = 13;
 				if (setsockopt(s1, IPPROTO_TCP, SO_RCVLOWAT, &option_value, sizeof(option_value)) == -1) { // Set sockopt to 13.
 					perror("			setsockopt failed");
-					close(s1);
+					if (close(s1) == -1)
+						perror("Closing socket failed");
 					continue;
 				}
 				else
@@ -417,21 +444,20 @@ int server_func(char *port, char *metainfo_file) {
 
 				if (fcntl(s1, F_SETFL, O_NONBLOCK) == -1) {	// Set socket to non-blocking.
 					perror("			fcntl failed");
-					close(s1);
+					if (close(s1) == -1)
+						perror("Closing socket failed");
 					continue;
 				}
 				else
 					log_printf(LOG_INFO, "			fcntl[O_NONBLOCK] successful");
 
 				// Append socket to fds:
-				if (nfds == MAX_CLIENTS_PER_SERVER + 1) {
-					log_printf(LOG_INFO, "			Error: The server reached its maximum number of connected clients.");
-					close(s1);
+				if (append_fd(fds, s1, POLLIN) == -1) {
+					log_printf(LOG_INFO, "			Error: The server reached its maximum number of connected clients. Skiping current client");
+					if (close(s1) == -1)
+						perror("Closing socket failed");
 					continue;
 				}
-
-				fds[nfds].fd = s1;
-				fds[nfds].events = POLLIN;
 				nfds++;
 			}
 			
@@ -447,9 +473,11 @@ int server_func(char *port, char *metainfo_file) {
 				if (recv(fds[i].fd, &message, sizeof(message), 0) == -1) { // Client has closed connection.
 					log_printf(LOG_INFO, "			client closed connection");
 
-					close(fds[i].fd);
+					if (close(fds[i].fd) == -1)
+						perror("Closing socket failed");
 								
-					fds[i].fd = 0;
+					fds[i].fd = -1;
+					fds[i].events = 0;
 					nfds--;
 					continue;
 				}
@@ -485,8 +513,8 @@ int server_func(char *port, char *metainfo_file) {
 				log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, POLLOUT);
 				log_printf(LOG_INFO, "		POLLOUT event");
 					
-				uint64_t n_block = (uint64_t) polloutResponses[i-1];
-				polloutResponses[i-1] = -1;
+				uint64_t n_block = (uint64_t) polloutResponses[i - 1];
+				polloutResponses[i - 1] = -1;
 
 				struct block_t block;
 				if (load_block(&torrent, n_block, &block) == -1) {
@@ -496,7 +524,7 @@ int server_func(char *port, char *metainfo_file) {
 
 				size_t size = MAX_BLOCK_SIZE;
 				if (n_block == (torrent.block_count - 1))
-					size = torrent.downloaded_file_size - (torrent.block_count - 1)*MAX_BLOCK_SIZE;
+					size = torrent.downloaded_file_size - (torrent.block_count - 1) * MAX_BLOCK_SIZE;
 
 				uint8_t responseWithBlock[size + RAW_MESSAGE_SIZE];
 				serialize((uint8_t*) &responseWithBlock, MAGIC_NUMBER, MSG_RESPONSE_OK, n_block);
@@ -522,7 +550,7 @@ int server_func(char *port, char *metainfo_file) {
 /**
  * Main function.
  */
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
 
 	set_log_level(LOG_DEBUG);
 	log_printf(LOG_INFO, "Trivial Torrent (build %s %s) by %s", __DATE__, __TIME__, "Y. CORDERO and A. VARGAS");
