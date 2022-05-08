@@ -17,6 +17,10 @@
 #include <poll.h>
 #include <assert.h>
 
+#ifdef ENABLE_FUZZING
+#include "sockets_harness.h"
+#endif
+
 // TODO: hey!? what is this?
 
 /**
