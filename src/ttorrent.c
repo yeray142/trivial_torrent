@@ -295,7 +295,7 @@ int client_func(char* metainfo_file) {
 		servAddr.sin_port = peer.peer_port;
 
 		log_printf(LOG_INFO, "Connecting to peer #%li... ", i);
-		if(connect(sock, (const struct sockaddr *) &servAddr, sizeof(servAddr)) == -1) {
+		if (connect(sock, (const struct sockaddr *) &servAddr, sizeof(servAddr)) == -1) {
 			perror("... connection failed");
 			if (close(sock) == -1)
 				perror("Closing socket failed");
@@ -338,11 +338,7 @@ int client_func(char* metainfo_file) {
 				// Receives the block from the server:
 				log_printf(LOG_INFO, "		Block available...");
 
-				size_t size = MAX_BLOCK_SIZE;
-				if (j == (torrent.block_count -1))
-					size = torrent.downloaded_file_size - (torrent.block_count - 1)*MAX_BLOCK_SIZE;
-
-				uint8_t response_block[size];
+				uint8_t response_block[get_block_size(&torrent, j)];
 				ssize_t size_block = recv(sock, &response_block, sizeof(response_block), MSG_WAITALL);
 				if (size_block == -1) {
 					perror("Block reception failed");
@@ -482,7 +478,7 @@ int server_func(char* port, char* metainfo_file) {
 				log_printf(LOG_INFO, "		POLLIN event");
 				uint8_t message[RAW_MESSAGE_SIZE];
 
-				if (recv(fds[i].fd, &message, sizeof(message), 0) == -1) { // Client has closed connection.
+				if (recv(fds[i].fd, &message, sizeof(message), 0) <= 0) { // Client has closed connection.
 					log_printf(LOG_INFO, "			client closed connection");
 
 					if (close(fds[i].fd) == -1)
