@@ -88,6 +88,7 @@ int handle_arguments(int argc, char** argv) {
  */
 void remove_extension(char* downloaded_name, const char* file_name) {
 	assert(file_name != NULL);
+	assert(downloaded_name != NULL);
 
 	for (int i = 0; i < (int) strlen((const char *) file_name); i++) {
 		if (file_name[i] != '.')
@@ -109,6 +110,9 @@ void remove_extension(char* downloaded_name, const char* file_name) {
  * @return void.
  */
 void serialize(uint8_t* buffer, const uint32_t magic_number, const uint8_t code, const uint64_t block_number) {
+	assert(buffer != NULL);
+	assert(magic_number == MAGIC_NUMBER);
+
 	// Serializes MAGIC NUMBER:
 	for (int i = 0; i < 4; i++)
 		buffer[i] = (uint8_t) ((magic_number >> (32 - (i+1)*8)) & 0xff);
@@ -132,6 +136,9 @@ void serialize(uint8_t* buffer, const uint32_t magic_number, const uint8_t code,
  */
 void deserialize(uint32_t* magic_number, uint8_t* message_code, uint64_t* block_number, const uint8_t* buffer) {
 	assert(buffer != NULL);
+	assert(magic_number != NULL);
+	assert(message_code != NULL);
+	assert(block_number != NULL);
 
 	// Deserializes MAGIC NUMBER:
 	*magic_number = 0;
@@ -160,6 +167,7 @@ void deserialize(uint32_t* magic_number, uint8_t* message_code, uint64_t* block_
  */
 int torrent_creation(struct torrent_t* torrent, const char* metainfo_file) {
 	assert(metainfo_file != NULL);
+	assert(torrent != NULL);
 
 	// Removes the extension of the metainfo_file string:
 	char downloaded_name[strlen(metainfo_file)];
@@ -228,6 +236,10 @@ int listening_socket(const char* port) {
  * @return -1 if something goes wrong or 0 if it was added successfully.
  */
 int append_fd(struct pollfd* fds, int fd, short events) {
+	assert(fds != NULL);
+	assert(fd > -1);
+	assert(events > -1);
+
 	// Loop through all the fds until an empty index is found:
 	int added = 0;
 	for (int i = 0; i <= MAX_CLIENTS_PER_SERVER; i++) {
