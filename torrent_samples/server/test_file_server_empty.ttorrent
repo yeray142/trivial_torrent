@@ -1,0 +1,12 @@
+# This is a sample .ttorrent file
+# File hash (you can obtain it with the following command: sha256sum test_file)
+07100096f4869dafd8aad313eda47d2f49f130f9f85042001bf2af3d5b2efb26
+# File size
+0
+# Peer count
+3
+# Block hashes...
+# Peers
+localhost:8080
+127.0.0.1:8081
+127.0.0.1:8082

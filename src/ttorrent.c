@@ -416,6 +416,12 @@ int server_func(char* port, char* metainfo_file) {
 	if (torrent_creation(&torrent, metainfo_file) == -1)
 		return -1;
 
+	if (torrent.block_count == 0) {
+		log_printf(LOG_INFO, "The specified torrent has 0 blocks!");
+		log_printf(LOG_INFO, "Ending serverside...");
+		return 0;
+	}
+
 	log_printf(LOG_INFO, "Total file size: %li", torrent.downloaded_file_size);
 
 	// 2. Gets the listening socket:
