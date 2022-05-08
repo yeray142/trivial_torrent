@@ -391,6 +391,7 @@ int client_func(char* metainfo_file) {
 			return -1;
 		}
 	}
+	log_printf(LOG_INFO, "We have got the whole file");
 	log_printf(LOG_INFO, "Ending clientside...");
 	return 0;
 }
@@ -537,7 +538,7 @@ int server_func(char* port, char* metainfo_file) {
 
 				if (send(fds[i].fd, &response, sizeof(response), 0) == -1) {
 					perror("			Message sending failed");
-					
+
 					log_printf(LOG_INFO, "			closing client connection");
 					if (close(fds[i].fd) == -1)
 						perror("Closing socket failed");
@@ -563,17 +564,15 @@ int server_func(char* port, char* metainfo_file) {
 					continue;
 				}
 
-				size_t size = MAX_BLOCK_SIZE;
-				if (n_block == (torrent.block_count - 1))
-					size = torrent.downloaded_file_size - (torrent.block_count - 1) * MAX_BLOCK_SIZE;
+				size_t block_size = get_block_size(&torrent, n_block);
 
-				uint8_t responseWithBlock[size + RAW_MESSAGE_SIZE];
+				uint8_t responseWithBlock[block_size + RAW_MESSAGE_SIZE];
 				serialize((uint8_t*) &responseWithBlock, MAGIC_NUMBER, MSG_RESPONSE_OK, n_block);
-				for (ssize_t k = 0; k < MAX_BLOCK_SIZE; k++)
+				for (size_t k = 0; k < block_size; k++)
 					responseWithBlock[k + RAW_MESSAGE_SIZE] = block.data[k];
 
 				log_printf(LOG_INFO, "			Sending prepared response...");
-				ssize_t s = send(fds[i].fd, &responseWithBlock, MAX_BLOCK_SIZE + RAW_MESSAGE_SIZE, 0);
+				ssize_t s = send(fds[i].fd, &responseWithBlock, block_size + RAW_MESSAGE_SIZE, 0);
 				if (s == -1) {
 					perror("			Message sending failed");
 
@@ -586,7 +585,7 @@ int server_func(char* port, char* metainfo_file) {
 					nfds--;
 					continue;
 				}
-				log_printf(LOG_INFO, "			...%i of %i bytes sent", size + RAW_MESSAGE_SIZE, size + RAW_MESSAGE_SIZE);
+				log_printf(LOG_INFO, "			...%i of %i bytes sent", block_size + RAW_MESSAGE_SIZE, block_size + RAW_MESSAGE_SIZE);
 				fds[i].events = POLLIN;
 			}
 		}
