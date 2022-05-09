@@ -270,6 +270,7 @@ int append_fd(struct pollfd* fds, int fd, short events) {
 uint64_t check_blocks(struct torrent_t* torrent) {
 	assert(torrent != NULL);
 
+	// Loop through all the blocks and check if it's unavailable:
 	uint64_t n_unavailable_blocks = 0;
 	for (uint64_t i = 0; i < torrent->block_count; i++) {
 		if (torrent->block_map[i] == 1)
@@ -395,6 +396,13 @@ int client_func(char* metainfo_file) {
 			return -1;
 		}
 	}
+
+	// Desallocate torrent structure:
+	if (destroy_torrent(&torrent) == -1) {
+		perror("Destroying torrent failed");
+		return -1;
+	}
+
 	log_printf(LOG_INFO, "We have got the whole file");
 	log_printf(LOG_INFO, "Ending clientside...");
 	return 0;
@@ -474,8 +482,9 @@ int server_func(char* port, char* metainfo_file) {
 				
 				log_printf(LOG_INFO, "			accept ok");
 
+				// Set sockopt to 13.
 				int option_value = 13;
-				if (setsockopt(s1, IPPROTO_TCP, SO_RCVLOWAT, &option_value, sizeof(option_value)) == -1) { // Set sockopt to 13.
+				if (setsockopt(s1, IPPROTO_TCP, SO_RCVLOWAT, &option_value, sizeof(option_value)) == -1) { 
 					perror("			setsockopt failed");
 					if (close(s1) == -1)
 						perror("Closing socket failed");
@@ -484,7 +493,8 @@ int server_func(char* port, char* metainfo_file) {
 				else
 					log_printf(LOG_INFO, "			setsockopt[SO_RCVLOWAT=13] successful");
 
-				if (fcntl(s1, F_SETFL, O_NONBLOCK) == -1) {	// Set socket to non-blocking.
+				// Set socket to non-blocking.
+				if (fcntl(s1, F_SETFL, O_NONBLOCK) == -1) {	
 					perror("			fcntl failed");
 					if (close(s1) == -1)
 						perror("Closing socket failed");
@@ -512,7 +522,8 @@ int server_func(char* port, char* metainfo_file) {
 				log_printf(LOG_INFO, "		POLLIN event");
 				uint8_t message[RAW_MESSAGE_SIZE];
 
-				if (recv(fds[i].fd, &message, sizeof(message), 0) <= 0) { // Client has closed connection.
+				if (recv(fds[i].fd, &message, sizeof(message), 0) <= 0) { 
+					// Client has closed connection.
 					log_printf(LOG_INFO, "			client closed connection");
 
 					if (close(fds[i].fd) == -1)
@@ -564,7 +575,8 @@ int server_func(char* port, char* metainfo_file) {
 			else if (fds[i].revents & POLLOUT) { // Attend POLLOUT events.
 				log_printf(LOG_INFO, "		processing pollfd with index %i (fd =  %i, .events = %i, .revents = %i)", i, fds[i].fd, fds[i].events, POLLOUT);
 				log_printf(LOG_INFO, "		POLLOUT event");
-					
+				
+				// Load the requested block:
 				uint64_t n_block = polloutResponses[i - 1];
 				polloutResponses[i - 1] = 0;
 
@@ -576,6 +588,7 @@ int server_func(char* port, char* metainfo_file) {
 
 				size_t block_size = get_block_size(&torrent, n_block);
 
+				// Send the block to the client:
 				uint8_t responseWithBlock[block_size + RAW_MESSAGE_SIZE];
 				serialize((uint8_t*) &responseWithBlock, MAGIC_NUMBER, MSG_RESPONSE_OK, n_block);
 				for (size_t k = 0; k < block_size; k++)
@@ -600,6 +613,13 @@ int server_func(char* port, char* metainfo_file) {
 			}
 		}
 	}
+
+	// Desallocate torrent structure:
+	if (destroy_torrent(&torrent) == -1) {
+		perror("Destroying torrent failed");
+		return -1;
+	}
+
 	log_printf(LOG_INFO, "Ending serverside...");
 	return 0;
 }
